@@ -1,10 +1,8 @@
-## Im Coming Here
-
 # 💳 Distributed Modular Monolith Payment Gateway
 
 Proyek ini adalah **Implementasi Distribute Modular Monolith Payment Gateway** dari **Sistem Gerbang Pembayaran**. Arsitektur ini dirancang untuk menyediakan **backend yang aman, dapat diskalakan, dan modular** untuk menangani transaksi keuangan, pembayaran merchant, operasi kartu, dan alur penyelesaian.
 
-Tidak seperti monolit tradisional, sistem ini disusun menjadi **modul (layanan) yang terdefinisi dengan baik** seperti **Auth, Pengguna, Peran, Kartu, Saldo, Transaksi, Merchant, Transfer, Isi Ulang, Tarik Tunai**, dll. Setiap modul berkomunikasi secara internal melalui **gRPC** dan secara eksternal melalui **API Gateway (NGINX)**. Peristiwa dipublikasikan melalui **Kafka** untuk alur kerja asinkron yang digerakkan oleh peristiwa (misalnya, penyelesaian, notifikasi email, pembaruan saldo).
+Tidak seperti monolit tradisional, sistem ini disusun menjadi **modul (layanan) yang terdefinisi dengan baik** seperti **Auth, Pengguna, Peran, Kartu, Saldo, Transaksi, Merchant, Transfer, Isi Ulang, Tarik Tunai**, dll. Setiap modul berkomunikasi secara internal melalui **gRPC** dan secara eksternal melalui **Graphql API Gateway (NGINX)**. Peristiwa dipublikasikan melalui **Kafka** untuk alur kerja asinkron yang digerakkan oleh peristiwa (misalnya, penyelesaian, notifikasi email, pembaruan saldo).
 
 Di lapisan infrastruktur, sistem terintegrasi dengan:
 
@@ -72,7 +70,7 @@ Penerapan dapat dijalankan di:
 
 ### **1. Docker Compose (Pengembangan Lokal)**
 
-- Mengatur **API Gateway, Layanan Inti, Pesan (Kafka + Zookeeper), Basis Data (PostgreSQL), Redis, Layanan Email, dan tumpukan Observabilitas**.
+- Mengatur **Graphql API Gateway, Layanan Inti, Pesan (Kafka + Zookeeper), Basis Data (PostgreSQL), Redis, Layanan Email, dan tumpukan Observabilitas**.
 - Ideal untuk **pengujian integrasi** dan menjalankan sistem gerbang pembayaran penuh secara lokal.
 - Pengembang dapat memvalidasi alur transaksi ujung ke ujung (misalnya, kartu → saldo → transaksi → email).
 
@@ -89,30 +87,31 @@ Penerapan dapat dijalankan di:
 
 ## 🛠️ Teknologi yang Digunakan
 
-- 🚀 **gRPC** — Menyediakan API berkinerja tinggi dan bertipe kuat.
-- 📡 **Kafka** — Digunakan untuk mempublikasikan peristiwa terkait saldo (misalnya, setelah pembuatan kartu).
-- 📈 **Prometheus** — Mengumpulkan metrik seperti jumlah permintaan dan latensi untuk setiap metode RPC.
-- 🛰️ **OpenTelemetry (OTel)** — Memungkinkan pelacakan terdistribusi untuk observabilitas.
-- 🦫 **Go (Golang)** — Bahasa implementasi.
-- 🌐 **Echo** — Kerangka kerja HTTP untuk Go.
-- 🪵 **Zap Logger** — Pencatatan terstruktur untuk debugging dan operasi.
-- 📦 **Sqlc** — Generator kode SQL untuk Go.
-- 🧳 **Goose** — Alat migrasi basis data.
-- 🐳 **Docker** — Alat kontainerisasi.
-- 🧱 **Docker Compose** — Menyederhanakan kontainerisasi untuk lingkungan pengembangan dan produksi.
-- 🐘 **PostgreSQL** — Basis data relasional untuk menyimpan data pengguna.
-- 📃 **Swago** — Generator dokumentasi API.
-- 🧭 **Zookeeper** — Manajemen konfigurasi terdistribusi.
-- 🔀 **Nginx** — Proksi terbalik untuk lalu lintas HTTP.
-- 🔍 **Jaeger** — Pelacakan terdistribusi untuk observabilitas.
-- 📊 **Grafana** — Alat pemantauan dan visualisasi.
-- 🧪 **Postman** — Klien API untuk menguji dan men-debug endpoint.
-- ☸️ **Kubernetes** — Platform orkestrasi kontainer untuk penerapan, penskalaan, dan manajemen.
-- 🧰 **Redis** — Penyimpanan nilai kunci dalam memori yang digunakan untuk caching dan akses data cepat.
-- 📥 **Loki** — Sistem agregasi log untuk mengumpulkan dan menanyakan log.
-- 📤 **Promtail** — Agen pengiriman log yang mengirim log ke Loki.
-- 🔧 **OTel Collector** — Kolektor agnostik vendor untuk menerima, memproses, dan mengekspor data telemetri (metrik, jejak, log).
-- 🖥️ **Node Exporter** — Mengekspos metrik tingkat sistem (host) seperti CPU, memori, disk, dan statistik jaringan untuk Prometheus.
+- 🧠 **GraphQL API Gateway** — Titik masuk tunggal untuk seluruh sistem. Menggabungkan data dari berbagai microservice (via gRPC) dan menyajikannya dalam bentuk GraphQL schema.
+- 🌐 **net/http** — Digunakan untuk menangani permintaan HTTP GraphQL tanpa framework tambahan (lebih ringan dibanding Echo).
+- 🪵 **Zap Logger** — Logging terstruktur untuk gateway.
+- 📈 **Prometheus** — Mengambil metrik HTTP (request count, latency, error rate) dari gateway endpoint `/metrics`.
+- 🛰️ **OpenTelemetry (OTel)** — Mengirim trace dari GraphQL gateway ke Jaeger untuk pelacakan terdistribusi.
+- 🔍 **Jaeger** — Menampilkan trace antar layanan untuk debugging observabilitas.
+- 📊 **Grafana** — Visualisasi metrik dari Prometheus dan log dari Loki.
+- 📥 **Loki** + **📤 Promtail** — Stack logging untuk seluruh layanan, termasuk GraphQL gateway.
+- ☸️ **Kubernetes** — Orkestrasi semua komponen gateway dan microservices.
+- 🚀 **gRPC** — API utama antar layanan (Role, User, Transaction, dsb) untuk performa tinggi dan komunikasi bertipe kuat.
+- 📡 **Kafka** — Sistem event streaming untuk komunikasi asynchronous antar service (misalnya transaksi, notifikasi saldo, dsb).
+- 🧰 **Redis** — Cache untuk validasi token, session, dan lookup cepat.
+- 🐘 **PostgreSQL** — Basis data utama untuk penyimpanan data terstruktur.
+- 📦 **Sqlc** — Generator kode SQL untuk Go agar query tetap aman dan cepat.
+- 🧳 **Goose** — Mengelola migrasi skema database secara versioned.
+- 🧪 **Postman** — Untuk pengujian API gRPC (via gRPC reflection atau gateway endpoint).
+- 🧱 **Docker** & **🐳 Docker Compose** — Digunakan untuk local development environment.
+- ☸️ **Kubernetes** — Untuk deployment, auto-scaling, dan service discovery antar microservice.
+- 📈 **Prometheus** — Mengumpulkan metrik RPC (count, latency) dari setiap service.
+- 🛰️ **OpenTelemetry (OTel Collector)** — Mengumpulkan trace dan metrik dari semua service dan gateway.
+- 🔍 **Jaeger** — Menampilkan jejak aliran RPC dan event antar service untuk observabilitas menyeluruh.
+- 🖥️ **Node Exporter** — Metrik tingkat host (CPU, memory, disk, network).
+- 🧭 **Zookeeper** — Dependency Kafka untuk koordinasi broker.
+- 🔧 **Nginx (Ingress Controller)** — (Opsional) Untuk routing dari luar cluster ke GraphQL gateway.
+- 📃 **Swago** — (Opsional) Untuk dokumentasi auto-generated API jika masih ada REST endpoint tambahan.
 
 ---
 
@@ -211,10 +210,10 @@ Pengaturan Docker menggunakan `docker-compose` untuk mengatur semua layanan, bas
 ```mermaid
 flowchart TD
     %% ======================
-    %% API Gateway
+    %% API Gateway (GraphQL)
     %% ======================
     subgraph Gateway
-        NGINX[API Gateway / NGINX]
+        GQL[GraphQL API Gateway\n Deployment + Pod]
     end
 
     %% ======================
@@ -266,10 +265,16 @@ flowchart TD
     %% ======================
     %% Gateway Connections
     %% ======================
-    NGINX --> TS
-    NGINX --> CS
-    NGINX --> US
-    NGINX --> RS
+    GQL --> TS
+    GQL --> CS
+    GQL --> US
+    GQL --> RS
+    GQL --> MS
+    GQL --> BS
+    GQL --> AS
+    GQL --> TRS
+    GQL --> TUS
+    GQL --> WS
 
     %% ======================
     %% Core Service Connections
@@ -308,6 +313,7 @@ flowchart TD
     %% Observability Connections
     %% ======================
     CoreServices -->|/metrics| Prometheus
+    GQL -->|/metrics| Prometheus
     Redis -->|/metrics| Prometheus
     Kafka -->|/metrics| Prometheus
     Promtail --> Loki
@@ -318,7 +324,9 @@ flowchart TD
     Prometheus --> OtelCollector
     OtelCollector --> Jaeger
 
-
+    %% ======================
+    %% STYLING
+    %% ======================
     classDef default fill:#1e1e2e,stroke:#89b4fa,color:#cdd6f4,stroke-width:1px;
     classDef gateway fill:#1e293b,stroke:#94e2d5,color:#f0fdfa,font-weight:bold;
     classDef core fill:#313244,stroke:#cba6f7,color:#f5e0dc,font-weight:bold;
@@ -326,15 +334,12 @@ flowchart TD
     classDef observ fill:#1a2e05,stroke:#a6e3a1,color:#d9f99d;
     classDef misc fill:#1e3a8a,stroke:#89b4fa,color:#bfdbfe;
 
-
-
     %% Assign classes
-    class NGINX gateway;
+    class GQL gateway;
     class CoreServices core;
     class MessagingAndStorage infra;
     class ObservabilityStack observ;
     class EmailS,Migration misc;
-
 ```
 
 #### Lingkungan Kubernetes
@@ -349,10 +354,11 @@ flowchart TD
     subgraph K8s["Kubernetes Cluster"]
 
         %% ----------------------
-        %% Ingress + API Gateway
+        %% Ingress + GraphQL Gateway
         %% ----------------------
         subgraph ingress["Namespace: ingress"]
-            NGINX["API Gateway (Ingress Controller)\n[Service + Pod]"]
+            NGINX["Ingress Controller (NGINX)\n[Service + Pod]"]
+            GQL["GraphQL API Gateway\n[Deployment + Pod]"]
         end
 
         %% ----------------------
@@ -407,10 +413,14 @@ flowchart TD
     %% ======================
     %% Gateway Connections
     %% ======================
-    NGINX --> RS
-    NGINX --> US
-    NGINX --> TS
-    NGINX --> CS
+    NGINX --> GQL
+    GQL --> RS
+    GQL --> US
+    GQL --> TS
+    GQL --> CS
+    GQL --> AS
+    GQL --> MS
+    GQL --> BS
 
     %% ======================
     %% Service Events & Connections
@@ -468,7 +478,7 @@ flowchart TD
     classDef observ fill:#1a2e05,stroke:#a6e3a1,color:#d9f99d;
     classDef misc fill:#1e3a8a,stroke:#89b4fa,color:#bfdbfe;
 
-    %% Apply classes to namespaces
+    %% Apply classes
     class ingress gateway;
     class core core;
     class infra infra;
@@ -481,8 +491,8 @@ flowchart TD
 ## 1. Klon Repositori
 
 ```bash
-git clone https://github.com/MamangRust/monolith-payment-gateway-grpc.git
-cd monolith-payment-gateway-grpc
+git clone https://github.com/MamangRust/monolith-graphql-paymentgateway-grpc.git
+cd monolith-graphql-paymentgateway-grpc
 ```
 
 ## 2. Menjalankan Secara Lokal dengan Docker Compose
@@ -586,60 +596,6 @@ Proyek ini dilengkapi dengan `Makefile` yang berisi berbagai perintah untuk memf
 
 ## Cuplikan Layar
 
-### Dokumentasi API
-
-<img src="./images/swagger.png" alt="hello-api-documentation">
-
 ### Dokumentasi ERD
 
 <img src="./images/Payment Gateway.png" alt="hello-erd-documentation" />
-
-### Dasbor Grafana (Prometheus & OpenTelemetry(Jaeger))
-
-#### Pengekspor Node
-
-<img src="./images//node-exporter.png" alt="hello-node-exporter-grafana-dashboard">
-
-#### Layanan Email
-
-<img src="./images/email-service.png" alt="hello-email-grafana-dashboard">
-
-#### Layanan Otentikasi
-
-<img src="./images/auth-service.png" alt="hello-auth-grafana-dashboard">
-
-#### Layanan Pengguna
-
-<img src="./images/user-service.png" alt="hello-user-grafana-dashboard">
-
-#### Layanan Peran
-
-<img src="./images/role-service.png" alt="hello-role-grafana-dashboard">
-
-#### Layanan Merchant
-
-<img src="./images/merchant-service.png" alt="hello-merchant-grafana-dashboard">
-
-#### Layanan Kartu
-
-<img src="./images/card-service.png" alt="hello-card-grafana-dashboard">
-
-#### Layanan Saldo
-
-<img src="./images/saldo-service.png" alt="hello-saldo-grafana-dashboard">
-
-#### Layanan Isi Ulang
-
-<img src="./images/topup-service.png" alt="hello-topup-grafana-dashboard">
-
-#### Layanan Transaksi
-
-<img src="./images/transaction-service.png" alt="hello-transaction-grafana-dashboard">
-
-#### Layanan Transfer
-
-<img src="./images/transfer-service.png" alt="hello-transfer-grafana-dashboard">
-
-#### Layanan Penarikan
-
-<img src="./images/withdraw-service.png" alt="hello-withdraw-grafana-dashboard">
