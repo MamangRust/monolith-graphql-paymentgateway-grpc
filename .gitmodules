@@ -1,0 +1,13 @@
+[submodule "proto"]
+	path = proto
+	url = https://github.com/MamangRust/monolith-graphql-payment-gateway-proto
+
+[submodule "pb"]
+	path = pb
+	url = https://github.com/MamangRust/monolith-graphql-payment-gateway-pb
+[submodule "shared"]
+	path = shared
+	url = https://github.com/MamangRust/monolith-graphql-payment-gateway-shared
+[submodule "pkg"]
+	path = pkg
+	url = https://github.com/MamangRust/monolith-graphql-payment-gateway-pkg
