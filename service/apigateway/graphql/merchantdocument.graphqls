@@ -117,7 +117,7 @@ extend type Query {
   ): ApiResponsePaginationMerchantDocument!
   findAllActiveMerchantDocuments(
     input: FindAllMerchantDocumentsInput!
-  ): ApiResponsePaginationMerchantDocument!
+  ): ApiResponsePaginationMerchantDocumentAt!
   findAllTrashedMerchantDocuments(
     input: FindAllMerchantDocumentsInput!
   ): ApiResponsePaginationMerchantDocumentAt!

@@ -11,17 +11,29 @@ import (
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pbcard "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/saldo"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CreateSaldo is the resolver for the createSaldo field.
 func (r *mutationResolver) CreateSaldo(ctx context.Context, input model.CreateSaldoInput) (*model.APIResponseSaldo, error) {
-	request := &pb.CreateSaldoRequest{
+	request := &requests.CreateSaldoRequest{
+		CardNumber:   input.CardNumber,
+		TotalBalance: int(input.TotalBalance),
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.CreateSaldoRequest{
 		CardNumber:   input.CardNumber,
 		TotalBalance: int32(input.TotalBalance),
 	}
 
-	saldo, err := r.SaldoGraphql.SaldoClient.SaldoCommandClient.CreateSaldo(ctx, request)
+	saldo, err := r.SaldoGraphql.SaldoClient.SaldoCommandClient.CreateSaldo(ctx, req)
 
 	if err != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
@@ -40,13 +52,25 @@ func (r *mutationResolver) UpdateSaldo(ctx context.Context, input model.UpdateSa
 		return nil, graphqlerror.ErrGraphqlSaldoInvalidID
 	}
 
-	request := &pb.UpdateSaldoRequest{
+	saldoId := int(id)
+	request := &requests.UpdateSaldoRequest{
+		SaldoID:      &saldoId,
+		CardNumber:   input.CardNumber,
+		TotalBalance: int(input.TotalBalance),
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.UpdateSaldoRequest{
 		SaldoId:      id,
 		CardNumber:   input.CardNumber,
 		TotalBalance: int32(input.TotalBalance),
 	}
 
-	saldo, err := r.SaldoGraphql.SaldoClient.SaldoCommandClient.UpdateSaldo(ctx, request)
+	saldo, err := r.SaldoGraphql.SaldoClient.SaldoCommandClient.UpdateSaldo(ctx, req)
 
 	if err != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)

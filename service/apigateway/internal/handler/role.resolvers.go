@@ -11,10 +11,21 @@ import (
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/role"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 )
 
 // CreateRole is the resolver for the createRole field.
 func (r *mutationResolver) CreateRole(ctx context.Context, input model.CreateRoleInput) (*model.APIResponseRole, error) {
+	request := &requests.CreateRoleRequest{
+		Name: input.Name,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.CreateRoleRequest{
 		Name: input.Name,
 	}
@@ -36,6 +47,17 @@ func (r *mutationResolver) UpdateRole(ctx context.Context, input model.UpdateRol
 
 	if roleId == 0 {
 		return nil, graphqlerror.ErrGraphqlRoleInvalidId
+	}
+
+	id := int(roleId)
+	request := &requests.UpdateRoleRequest{
+		ID:   &id,
+		Name: input.Name,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
 	}
 
 	req := &pb.UpdateRoleRequest{

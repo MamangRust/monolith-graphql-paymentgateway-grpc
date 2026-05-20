@@ -12,6 +12,8 @@ import (
 	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/withdraw"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -23,13 +25,24 @@ func (r *mutationResolver) CreateWithdraw(ctx context.Context, input model.Creat
 		return nil, fmt.Errorf("invalid date format for withdrawTime: %v (expected YYYY-MM-DD)", err)
 	}
 
-	request := &pb.CreateWithdrawRequest{
+	request := &requests.CreateWithdrawRequest{
+		CardNumber:     input.CardNumber,
+		WithdrawAmount: int(input.WithdrawAmount),
+		WithdrawTime:   withdrawTime,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.CreateWithdrawRequest{
 		CardNumber:     input.CardNumber,
 		WithdrawAmount: int32(input.WithdrawAmount),
 		WithdrawTime:   timestamppb.New(withdrawTime),
 	}
 
-	res, errResp := r.WithdrawGraphql.WithdrawClient.WithdrawCommandClient.CreateWithdraw(ctx, request)
+	res, errResp := r.WithdrawGraphql.WithdrawClient.WithdrawCommandClient.CreateWithdraw(ctx, req)
 	if errResp != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
 	}
@@ -50,14 +63,27 @@ func (r *mutationResolver) UpdateWithdraw(ctx context.Context, input model.Updat
 		return nil, fmt.Errorf("invalid date format for withdrawTime: %v (expected YYYY-MM-DD)", err)
 	}
 
-	request := &pb.UpdateWithdrawRequest{
+	withdrawId := int(id)
+	request := &requests.UpdateWithdrawRequest{
+		WithdrawID:     &withdrawId,
+		CardNumber:     input.CardNumber,
+		WithdrawAmount: int(input.WithdrawAmount),
+		WithdrawTime:   withdrawTime,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.UpdateWithdrawRequest{
 		WithdrawId:     id,
 		CardNumber:     input.CardNumber,
 		WithdrawAmount: int32(input.WithdrawAmount),
 		WithdrawTime:   timestamppb.New(withdrawTime),
 	}
 
-	res, errResp := r.WithdrawGraphql.WithdrawClient.WithdrawCommandClient.UpdateWithdraw(ctx, request)
+	res, errResp := r.WithdrawGraphql.WithdrawClient.WithdrawCommandClient.UpdateWithdraw(ctx, req)
 	if errResp != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
 	}

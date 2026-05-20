@@ -38,6 +38,9 @@ import (
 	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/kafka"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/logger"
 	"google.golang.org/grpc"
+	"fmt"
+	"github.com/go-playground/validator/v10"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 )
 
 // This file will not be regenerated automatically.
@@ -330,5 +333,47 @@ func NewResolver(
 			Logger:  logger,
 			Mapping: withdrawgraphqlmapper.NewWithdrawGraphqlMapper(),
 		},
+	}
+}
+
+func (r *Resolver) parseValidationErrors(err error) []sharedErrors.ValidationError {
+	var validationErrs []sharedErrors.ValidationError
+
+	if ve, ok := err.(validator.ValidationErrors); ok {
+		for _, fe := range ve {
+			validationErrs = append(validationErrs, sharedErrors.ValidationError{
+				Field:   fe.Field(),
+				Message: r.getValidationMessage(fe),
+			})
+		}
+		return validationErrs
+	}
+
+	return []sharedErrors.ValidationError{
+		{
+			Field:   "general",
+			Message: err.Error(),
+		},
+	}
+}
+
+func (r *Resolver) getValidationMessage(fe validator.FieldError) string {
+	switch fe.Tag() {
+	case "required":
+		return "This field is required"
+	case "email":
+		return "Invalid email format"
+	case "min":
+		return fmt.Sprintf("Must be at least %s", fe.Param())
+	case "max":
+		return fmt.Sprintf("Must be at most %s", fe.Param())
+	case "gte":
+		return fmt.Sprintf("Must be greater than or equal to %s", fe.Param())
+	case "lte":
+		return fmt.Sprintf("Must be less than or equal to %s", fe.Param())
+	case "oneof":
+		return fmt.Sprintf("Must be one of: %s", fe.Param())
+	default:
+		return fmt.Sprintf("Validation failed on '%s' tag", fe.Tag())
 	}
 }

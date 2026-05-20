@@ -13,6 +13,8 @@ import (
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card"
 	pbstats "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card/stats"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -22,6 +24,19 @@ func (r *mutationResolver) CreateCard(ctx context.Context, input model.CreateCar
 	expireDate, err := time.Parse("2006-01-02", input.ExpireDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid date format for ExpireDate: %v (expected YYYY-MM-DD)", err)
+	}
+
+	request := &requests.CreateCardRequest{
+		UserID:       int(input.UserID),
+		CardType:     input.CardType,
+		ExpireDate:   expireDate,
+		CVV:          input.Cvv,
+		CardProvider: input.CardProvider,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
 	}
 
 	req := &pb.CreateCardRequest{
@@ -50,7 +65,22 @@ func (r *mutationResolver) UpdateCard(ctx context.Context, input model.UpdateCar
 		return nil, fmt.Errorf("invalid date format for ExpireDate: %v (expected YYYY-MM-DD)", err)
 	}
 
+	request := &requests.UpdateCardRequest{
+		CardID:       int(input.CardID),
+		UserID:       int(input.UserID),
+		CardType:     input.CardType,
+		ExpireDate:   expireDate,
+		CVV:          input.Cvv,
+		CardProvider: input.CardProvider,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.UpdateCardRequest{
+		CardId:       int32(input.CardID),
 		UserId:       int32(input.UserID),
 		CardType:     input.CardType,
 		ExpireDate:   timestamppb.New(expireDate),

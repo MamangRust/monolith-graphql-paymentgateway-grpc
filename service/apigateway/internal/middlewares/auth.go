@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,13 +68,20 @@ func AuthMiddleware(tm auth.TokenManager, logger logger.LoggerInterface) func(ht
 			}
 
 			tokenString := parts[1]
-			userID, err := tm.ValidateToken(tokenString)
+			userIDStr, err := tm.ValidateToken(tokenString)
 			if err != nil {
 				logger.Debug("Token validation failed",
 					zap.Error(err),
 					zap.String("token", tokenString),
 				)
 				writeJSONError(w, "invalid or expired token", http.StatusUnauthorized)
+				return
+			}
+
+			userID, err := strconv.Atoi(userIDStr)
+			if err != nil {
+				logger.Error("Failed to parse user ID from token", zap.Error(err))
+				writeJSONError(w, "invalid user ID in token", http.StatusUnauthorized)
 				return
 			}
 

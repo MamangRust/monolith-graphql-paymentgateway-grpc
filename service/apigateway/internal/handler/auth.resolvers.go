@@ -12,25 +12,98 @@ import (
 	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 )
 
 // VerifyCode is the resolver for the verifyCode field.
 func (r *mutationResolver) VerifyCode(ctx context.Context, input model.VerifyCodeInput) (*model.APIResponseVerifyCode, error) {
-	panic(fmt.Errorf("not implemented: VerifyCode - verifyCode"))
+	req := &pb.VerifyCodeRequest{
+		Code: input.Code,
+	}
+
+	res, err := r.AuthGraphql.AuthClient.VerifyCode(ctx, req)
+
+	if err != nil {
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
+	}
+
+	so := r.AuthGraphql.Mapping.ToGraphqlVerifyCode(res)
+
+	return so, nil
 }
 
 // ForgotPassword is the resolver for the forgotPassword field.
 func (r *mutationResolver) ForgotPassword(ctx context.Context, input model.ForgotPasswordInput) (*model.APIResponseForgotPassword, error) {
-	panic(fmt.Errorf("not implemented: ForgotPassword - forgotPassword"))
+	request := &requests.ForgotPasswordRequest{
+		Email: input.Email,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.ForgotPasswordRequest{
+		Email: input.Email,
+	}
+
+	res, err := r.AuthGraphql.AuthClient.ForgotPassword(ctx, req)
+
+	if err != nil {
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
+	}
+
+	so := r.AuthGraphql.Mapping.ToGraphqlForgotPassword(res)
+
+	return so, nil
 }
 
 // ResetPassword is the resolver for the resetPassword field.
 func (r *mutationResolver) ResetPassword(ctx context.Context, input model.ResetPasswordInput) (*model.APIResponseResetPassword, error) {
-	panic(fmt.Errorf("not implemented: ResetPassword - resetPassword"))
+	request := &requests.CreateResetPasswordRequest{
+		ResetToken:      input.ResetToken,
+		Password:        input.Password,
+		ConfirmPassword: input.ConfirmPassword,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.ResetPasswordRequest{
+		ResetToken:      input.ResetToken,
+		Password:        input.Password,
+		ConfirmPassword: input.ConfirmPassword,
+	}
+
+	res, err := r.AuthGraphql.AuthClient.ResetPassword(ctx, req)
+
+	if err != nil {
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
+	}
+
+	so := r.AuthGraphql.Mapping.ToGraphqlResetPassword(res)
+
+	return so, nil
 }
 
 // RegisterUser is the resolver for the registerUser field.
 func (r *mutationResolver) RegisterUser(ctx context.Context, input model.RegisterInput) (*model.APIResponseRegister, error) {
+	request := &requests.RegisterRequest{
+		FirstName:       input.Firstname,
+		LastName:        input.Lastname,
+		Email:           input.Email,
+		Password:        input.Password,
+		ConfirmPassword: input.ConfirmPassword,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.RegisterRequest{
 		Firstname:       input.Firstname,
 		Lastname:        input.Lastname,
@@ -52,6 +125,16 @@ func (r *mutationResolver) RegisterUser(ctx context.Context, input model.Registe
 
 // LoginUser is the resolver for the loginUser field.
 func (r *mutationResolver) LoginUser(ctx context.Context, input model.LoginInput) (*model.APIResponseLogin, error) {
+	request := &requests.AuthRequest{
+		Email:    input.Email,
+		Password: input.Password,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.LoginRequest{
 		Email:    input.Email,
 		Password: input.Password,

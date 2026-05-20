@@ -115,3 +115,23 @@ func (s *merchantDocumentGraphqlMapper) mapResponsesMerchantDocumentDeleteAt(doc
 	}
 	return responseDocs
 }
+
+func (s *merchantDocumentGraphqlMapper) mapResponsesMerchantDocumentFromDeleteAt(docs []*pb.MerchantDocumentDeleteAt) []*model.MerchantDocumentResponse {
+	var responseDocs []*model.MerchantDocumentResponse
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+		responseDocs = append(responseDocs, &model.MerchantDocumentResponse{
+			DocumentID:   int32(doc.DocumentId),
+			MerchantID:   int32(doc.MerchantId),
+			DocumentType: doc.DocumentType,
+			DocumentURL:  doc.DocumentUrl,
+			Status:       doc.Status,
+			Note:         doc.Note,
+			UploadedAt:   doc.UploadedAt,
+			UpdatedAt:    doc.UpdatedAt,
+		})
+	}
+	return responseDocs
+}

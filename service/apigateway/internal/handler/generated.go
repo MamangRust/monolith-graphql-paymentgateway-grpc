@@ -1671,7 +1671,7 @@ type QueryResolver interface {
 	FindByActive(ctx context.Context, input model.FindAllMerchantInput) (*model.APIResponsePaginationMerchantDeleteAt, error)
 	FindByTrashed(ctx context.Context, input model.FindAllMerchantInput) (*model.APIResponsePaginationMerchantDeleteAt, error)
 	FindAllMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocument, error)
-	FindAllActiveMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocument, error)
+	FindAllActiveMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocumentAt, error)
 	FindAllTrashedMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocumentAt, error)
 	FindMerchantDocumentByID(ctx context.Context, input model.FindMerchantDocumentByIDInput) (*model.APIResponseMerchantDocument, error)
 	FindAllRole(ctx context.Context, input model.FindAllRoleInput) (*model.APIResponsePaginationRole, error)
@@ -9556,7 +9556,7 @@ extend type Query {
   ): ApiResponsePaginationMerchantDocument!
   findAllActiveMerchantDocuments(
     input: FindAllMerchantDocumentsInput!
-  ): ApiResponsePaginationMerchantDocument!
+  ): ApiResponsePaginationMerchantDocumentAt!
   findAllTrashedMerchantDocuments(
     input: FindAllMerchantDocumentsInput!
   ): ApiResponsePaginationMerchantDocumentAt!
@@ -35096,7 +35096,7 @@ func (ec *executionContext) _Query_findAllActiveMerchantDocuments(ctx context.Co
 			return ec.resolvers.Query().FindAllActiveMerchantDocuments(ctx, fc.Args["input"].(model.FindAllMerchantDocumentsInput))
 		},
 		nil,
-		ec.marshalNApiResponsePaginationMerchantDocument2ᚖgithubᚗcomᚋMamangRustᚋmonolithᚑgraphqlᚑpaymentᚑgatewayᚑapigatewayᚋinternalᚋmodelᚐAPIResponsePaginationMerchantDocument,
+		ec.marshalNApiResponsePaginationMerchantDocumentAt2ᚖgithubᚗcomᚋMamangRustᚋmonolithᚑgraphqlᚑpaymentᚑgatewayᚑapigatewayᚋinternalᚋmodelᚐAPIResponsePaginationMerchantDocumentAt,
 		true,
 		true,
 	)
@@ -35111,15 +35111,15 @@ func (ec *executionContext) fieldContext_Query_findAllActiveMerchantDocuments(ct
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			switch field.Name {
 			case "status":
-				return ec.fieldContext_ApiResponsePaginationMerchantDocument_status(ctx, field)
+				return ec.fieldContext_ApiResponsePaginationMerchantDocumentAt_status(ctx, field)
 			case "message":
-				return ec.fieldContext_ApiResponsePaginationMerchantDocument_message(ctx, field)
+				return ec.fieldContext_ApiResponsePaginationMerchantDocumentAt_message(ctx, field)
 			case "data":
-				return ec.fieldContext_ApiResponsePaginationMerchantDocument_data(ctx, field)
+				return ec.fieldContext_ApiResponsePaginationMerchantDocumentAt_data(ctx, field)
 			case "pagination":
-				return ec.fieldContext_ApiResponsePaginationMerchantDocument_pagination(ctx, field)
+				return ec.fieldContext_ApiResponsePaginationMerchantDocumentAt_pagination(ctx, field)
 			}
-			return nil, fmt.Errorf("no field named %q was found under type ApiResponsePaginationMerchantDocument", field.Name)
+			return nil, fmt.Errorf("no field named %q was found under type ApiResponsePaginationMerchantDocumentAt", field.Name)
 		},
 	}
 	defer func() {

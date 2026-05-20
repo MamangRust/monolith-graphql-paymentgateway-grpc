@@ -11,17 +11,29 @@ import (
 	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/merchant"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CreateMerchant is the resolver for the createMerchant field.
 func (r *mutationResolver) CreateMerchant(ctx context.Context, input model.CreateMerchantInput) (*model.APIResponseMerchant, error) {
-	request := &pb.CreateMerchantRequest{
+	request := requests.CreateMerchantRequest{
+		Name:   input.Name,
+		UserID: int(input.UserID),
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.CreateMerchantRequest{
 		Name:   input.Name,
 		UserId: int32(input.UserID),
 	}
 
-	merchant, errResp := r.MerchantGraphql.MerchantClient.MerchantCommand.CreateMerchant(ctx, request)
+	merchant, errResp := r.MerchantGraphql.MerchantClient.MerchantCommand.CreateMerchant(ctx, req)
 	if errResp != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
 	}
@@ -32,19 +44,31 @@ func (r *mutationResolver) CreateMerchant(ctx context.Context, input model.Creat
 
 // UpdateMerchant is the resolver for the updateMerchant field.
 func (r *mutationResolver) UpdateMerchant(ctx context.Context, input model.UpdateMerchantInput) (*model.APIResponseMerchant, error) {
-	id := int32(input.MerchantID)
+	id := int(input.MerchantID)
 	if id == 0 {
 		return nil, graphqlerror.ErrGraphqlMerchantInvalidID
 	}
 
-	request := &pb.UpdateMerchantRequest{
-		MerchantId: id,
+	request := requests.UpdateMerchantRequest{
+		MerchantID: &id,
+		Name:       input.Name,
+		UserID:     int(input.UserID),
+		Status:     input.Status,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.UpdateMerchantRequest{
+		MerchantId: int32(id),
 		Name:       input.Name,
 		UserId:     input.UserID,
 		Status:     input.Status,
 	}
 
-	merchant, errResp := r.MerchantGraphql.MerchantClient.MerchantCommand.UpdateMerchant(ctx, request)
+	merchant, errResp := r.MerchantGraphql.MerchantClient.MerchantCommand.UpdateMerchant(ctx, req)
 	if errResp != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
 	}

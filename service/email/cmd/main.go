@@ -1,0 +1,94 @@
+package main
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"github.com/MamangRust/monolith-graphql-payment-gateway-email/config"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-email/handler"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-email/mailer"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/dotenv"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/kafka"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/logger"
+	otel_pkg "github.com/MamangRust/monolith-graphql-payment-gateway-pkg/otel"
+	"github.com/spf13/viper"
+	"go.uber.org/zap"
+)
+
+func main() {
+	telemetry := otel_pkg.NewTelemetry(otel_pkg.Config{
+		ServiceName:            "email-service",
+		ServiceVersion:         "v1.0.0",
+		Environment:            "production",
+		Endpoint:               "otel-collector:4317",
+		Insecure:               true,
+		EnableRuntimeMetrics:   true,
+		RuntimeMetricsInterval: 15 * time.Second,
+	})
+
+	if err := telemetry.Init(context.Background()); err != nil {
+		return
+	}
+
+	logger, err := logger.NewLogger("email-service", telemetry.GetLogger())
+	if err != nil {
+		log.Fatalf("Error creating logger: %v", err)
+	}
+
+	if err := dotenv.Viper(); err != nil {
+		logger.Fatal("Failed to load .env file", zap.Error(err))
+	}
+
+	ctx := context.Background()
+
+	cfg := config.Config{
+		KafkaBrokers: []string{viper.GetString("KAFKA_BROKERS")},
+		SMTPServer:   viper.GetString("SMTP_SERVER"),
+		SMTPPort:     viper.GetInt("SMTP_PORT"),
+		SMTPUser:     viper.GetString("SMTP_USER"),
+		SMTPPass:     viper.GetString("SMTP_PASS"),
+	}
+
+	defer func() {
+		if err := telemetry.Shutdown(ctx); err != nil {
+			logger.Fatal("Failed to shutdown tracer provider", zap.Error(err))
+		}
+	}()
+
+	m := mailer.NewMailer(
+		ctx,
+		cfg.SMTPServer,
+		cfg.SMTPPort,
+		cfg.SMTPUser,
+		cfg.SMTPPass,
+		logger,
+	)
+
+	h := handler.NewEmailHandler(ctx, logger, m)
+
+	myKafka := kafka.NewKafka(logger, cfg.KafkaBrokers)
+
+	err = myKafka.StartConsumers([]string{
+		"email-service-topic-auth-register",
+		"email-service-topic-auth-forgot-password",
+		"email-service-topic-auth-verify-code-success",
+		"email-service-topic-saldo-create",
+		"email-service-topic-topup-create",
+		"email-service-topic-transaction-create",
+		"email-service-topic-transfer-create",
+		"email-service-topic-merchant-create",
+		"email-service-topic-merchant-update-status",
+		"email-service-topic-merchant-document-create",
+		"email-service-topic-merchant-document-update-status",
+	}, "email-service-group", h)
+
+	if err != nil {
+		log.Fatalf("Error starting consumer: %v", err)
+	}
+
+	logger.Info("Email service started", zap.String("service", "email-service"))
+
+	select {}
+
+}

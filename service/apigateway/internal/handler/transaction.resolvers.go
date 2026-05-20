@@ -12,6 +12,8 @@ import (
 	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/transaction"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -29,6 +31,20 @@ func (r *mutationResolver) CreateTransaction(ctx context.Context, input model.Cr
 	if err != nil {
 		return nil, fmt.Errorf("invalid date format for transactionTime: %v (expected YYYY-MM-DD)", err)
 	}
+
+	request := &requests.CreateTransactionRequest{
+		CardNumber:      input.CardNumber,
+		Amount:          int(input.Amount),
+		PaymentMethod:   input.PaymentMethod,
+		MerchantID:      &merchantId,
+		TransactionTime: transactionTime,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.CreateTransactionRequest{
 		ApiKey:          input.APIKey,
 		CardNumber:      input.CardNumber,
@@ -64,17 +80,33 @@ func (r *mutationResolver) UpdateTransaction(ctx context.Context, input model.Up
 	}
 
 	transactionTime, err := time.Parse("2006-01-02", *input.TransactionTime)
-	merchantId := int32(input.MerchantID)
+	merchantId := int(input.MerchantID)
 
 	if err != nil {
 		return nil, fmt.Errorf("invalid date format for transactionTime: %v (expected YYYY-MM-DD)", err)
 	}
+
+	txnId := int(id)
+	request := &requests.UpdateTransactionRequest{
+		TransactionID:   &txnId,
+		CardNumber:      input.CardNumber,
+		Amount:          int(input.Amount),
+		PaymentMethod:   input.PaymentMethod,
+		MerchantID:      &merchantId,
+		TransactionTime: transactionTime,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.UpdateTransactionRequest{
 		TransactionId:   id,
 		CardNumber:      input.CardNumber,
 		Amount:          int32(input.Amount),
 		PaymentMethod:   input.PaymentMethod,
-		MerchantId:      merchantId,
+		MerchantId:      int32(merchantId),
 		TransactionTime: timestamppb.New(transactionTime),
 	}
 

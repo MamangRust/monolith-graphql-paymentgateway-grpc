@@ -2,8 +2,11 @@ package graphqlerror
 
 import (
 	"fmt"
+	"net/http"
 
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/response"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func ToGraphqlErrorFromErrorResponse(err error) error {
@@ -11,7 +14,16 @@ func ToGraphqlErrorFromErrorResponse(err error) error {
 		return nil
 	}
 
-	return fmt.Errorf("graphql error: %v", err)
+	st, ok := status.FromError(err)
+	if !ok {
+		return fmt.Errorf("graphql error: %v", err)
+	}
+
+	httpCode := grpcToHttpCode(st.Code())
+	statusText := http.StatusText(httpCode)
+	message := st.Message()
+
+	return NewGraphqlError(statusText, message, httpCode)
 }
 
 func NewGraphqlError(statusText string, message string, code int) error {
@@ -22,4 +34,25 @@ func NewGraphqlError(statusText string, message string, code int) error {
 	}
 
 	return fmt.Errorf("graphql error: [%d] %s - %s", errResp.Code, errResp.Status, errResp.Message)
+}
+
+func grpcToHttpCode(code codes.Code) int {
+	switch code {
+	case codes.InvalidArgument:
+		return http.StatusBadRequest
+	case codes.Unauthenticated:
+		return http.StatusUnauthorized
+	case codes.PermissionDenied:
+		return http.StatusForbidden
+	case codes.NotFound:
+		return http.StatusNotFound
+	case codes.AlreadyExists:
+		return http.StatusConflict
+	case codes.ResourceExhausted:
+		return http.StatusTooManyRequests
+	case codes.DeadlineExceeded:
+		return http.StatusGatewayTimeout
+	default:
+		return http.StatusInternalServerError
+	}
 }

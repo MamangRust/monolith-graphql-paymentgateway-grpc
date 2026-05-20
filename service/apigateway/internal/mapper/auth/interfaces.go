@@ -8,7 +8,7 @@ import (
 type AuthGraphqlMapper interface {
 	ToGraphqlVerifyCode(res *pb.ApiResponseVerifyCode) *model.APIResponseVerifyCode
 	ToGraphqlForgotPassword(res *pb.ApiResponseForgotPassword) *model.APIResponseForgotPassword
-	ToGraphqlResetPassword(res *pb.ApiResponseResetPassword) *model.APIResponseForgotPassword
+	ToGraphqlResetPassword(res *pb.ApiResponseResetPassword) *model.APIResponseResetPassword
 	ToGraphqlResponseLogin(res *pb.ApiResponseLogin) *model.APIResponseLogin
 	ToGraphqlResponseRegister(res *pb.ApiResponseRegister) *model.APIResponseRegister
 	ToGraphqlResponseRefreshToken(res *pb.ApiResponseRefreshToken) *model.APIResponseRefreshToken

@@ -11,18 +11,31 @@ import (
 	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/topup"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CreateTopup is the resolver for the createTopup field.
 func (r *mutationResolver) CreateTopup(ctx context.Context, input model.CreateTopupInput) (*model.APIResponseTopup, error) {
-	request := &pb.CreateTopupRequest{
+	request := &requests.CreateTopupRequest{
+		CardNumber:  input.CardNumber,
+		TopupAmount: int(input.TopupAmount),
+		TopupMethod: input.TopupMethod,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.CreateTopupRequest{
 		CardNumber:  input.CardNumber,
 		TopupAmount: int32(input.TopupAmount),
 		TopupMethod: input.TopupMethod,
 	}
 
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.CreateTopup(ctx, request)
+	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.CreateTopup(ctx, req)
 
 	if err != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
@@ -41,14 +54,26 @@ func (r *mutationResolver) UpdateTopup(ctx context.Context, input model.UpdateTo
 		return nil, graphqlerror.ErrGraphqlTopupInvalidID
 	}
 
-	request := &pb.UpdateTopupRequest{
+	request := &requests.UpdateTopupRequest{
+		TopupID:     &id,
+		CardNumber:  input.CardNumber,
+		TopupAmount: int(input.TopupAmount),
+		TopupMethod: input.TopupMethod,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.UpdateTopupRequest{
 		TopupId:     int32(id),
 		CardNumber:  input.CardNumber,
 		TopupAmount: int32(input.TopupAmount),
 		TopupMethod: input.TopupMethod,
 	}
 
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.UpdateTopup(ctx, request)
+	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.UpdateTopup(ctx, req)
 
 	if err != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)

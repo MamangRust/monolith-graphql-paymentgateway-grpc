@@ -27,8 +27,8 @@ func (s *authGraphqlMapper) ToGraphqlForgotPassword(res *pb.ApiResponseForgotPas
 	}
 }
 
-func (s *authGraphqlMapper) ToGraphqlResetPassword(res *pb.ApiResponseResetPassword) *model.APIResponseForgotPassword {
-	return &model.APIResponseForgotPassword{
+func (s *authGraphqlMapper) ToGraphqlResetPassword(res *pb.ApiResponseResetPassword) *model.APIResponseResetPassword {
+	return &model.APIResponseResetPassword{
 		Status:  res.Status,
 		Message: res.Message,
 	}

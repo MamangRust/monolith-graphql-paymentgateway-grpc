@@ -12,10 +12,25 @@ import (
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/user"
 	"google.golang.org/protobuf/types/known/emptypb"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 )
 
 // CreateUser is the resolver for the createUser field.
 func (r *mutationResolver) CreateUser(ctx context.Context, input model.CreateUserInput) (*model.APIResponseUser, error) {
+	request := &requests.CreateUserRequest{
+		FirstName:       input.Firstname,
+		LastName:        input.Lastname,
+		Email:           input.Email,
+		Password:        input.Password,
+		ConfirmPassword: input.ConfirmPassword,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.CreateUserRequest{
 		Firstname:       input.Firstname,
 		Lastname:        input.Lastname,
@@ -41,13 +56,36 @@ func (r *mutationResolver) UpdateUser(ctx context.Context, input model.UpdateUse
 		return nil, graphqlerror.ErrGraphqlInvalidUserID
 	}
 
+	userId := int(id)
+	var password, confirmPassword string
+	if input.Password != nil {
+		password = *input.Password
+	}
+	if input.ConfirmPassword != nil {
+		confirmPassword = *input.ConfirmPassword
+	}
+
+	request := &requests.UpdateUserRequest{
+		UserID:          &userId,
+		FirstName:       input.Firstname,
+		LastName:        input.Lastname,
+		Email:           input.Email,
+		Password:        password,
+		ConfirmPassword: confirmPassword,
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
 	req := &pb.UpdateUserRequest{
 		Id:              id,
 		Firstname:       input.Firstname,
 		Lastname:        input.Lastname,
 		Email:           input.Email,
-		Password:        *input.Password,
-		ConfirmPassword: *input.ConfirmPassword,
+		Password:        password,
+		ConfirmPassword: confirmPassword,
 	}
 
 	user, errResp := r.UserGraphql.UserClient.UserCommandClient.Update(ctx, req)

@@ -11,17 +11,30 @@ import (
 	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/transfer"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
+	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 )
 
 // CreateTransfer is the resolver for the createTransfer field.
 func (r *mutationResolver) CreateTransfer(ctx context.Context, input model.CreateTransferInput) (*model.APIResponseTransfer, error) {
-	request := &pb.CreateTransferRequest{
+	request := &requests.CreateTransferRequest{
+		TransferFrom:   input.TransferFrom,
+		TransferTo:     input.TransferTo,
+		TransferAmount: int(input.TransferAmount),
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.CreateTransferRequest{
 		TransferFrom:   input.TransferFrom,
 		TransferTo:     input.TransferTo,
 		TransferAmount: int32(input.TransferAmount),
 	}
 
-	res, err := r.TransferGraphql.TransferClient.TransferCommandClient.CreateTransfer(ctx, request)
+	res, err := r.TransferGraphql.TransferClient.TransferCommandClient.CreateTransfer(ctx, req)
 	if err != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
 	}
@@ -38,14 +51,27 @@ func (r *mutationResolver) UpdateTransfer(ctx context.Context, input model.Updat
 		return nil, graphqlerror.ErrGraphqlTransferInvalidID
 	}
 
-	request := &pb.UpdateTransferRequest{
+	transferId := int(id)
+	request := &requests.UpdateTransferRequest{
+		TransferID:     &transferId,
+		TransferFrom:   input.TransferFrom,
+		TransferTo:     input.TransferTo,
+		TransferAmount: int(input.TransferAmount),
+	}
+
+	if err := request.Validate(); err != nil {
+		validations := r.parseValidationErrors(err)
+		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
+	}
+
+	req := &pb.UpdateTransferRequest{
 		TransferId:     id,
 		TransferFrom:   input.TransferFrom,
 		TransferTo:     input.TransferTo,
 		TransferAmount: int32(input.TransferAmount),
 	}
 
-	res, err := r.TransferGraphql.TransferClient.TransferCommandClient.UpdateTransfer(ctx, request)
+	res, err := r.TransferGraphql.TransferClient.TransferCommandClient.UpdateTransfer(ctx, req)
 	if err != nil {
 		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
 	}

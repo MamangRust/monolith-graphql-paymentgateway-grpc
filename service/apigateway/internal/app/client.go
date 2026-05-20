@@ -22,7 +22,7 @@ import (
 	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/logger"
 	otel_pkg "github.com/MamangRust/monolith-graphql-payment-gateway-pkg/otel"
 	redisclient "github.com/MamangRust/monolith-graphql-payment-gateway-pkg/redis"
-	"github.com/MamangRust/monolith-payment-gateway-pkg/dotenv"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/dotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -156,14 +156,27 @@ func RunClient() (*Client, func(), error) {
 
 	addresses := loadServiceAddresses()
 
-	log, err := logger.NewLogger("apigateway")
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create logger: %w", err)
+	if err := dotenv.Viper(); err != nil {
+		fmt.Printf("Warning: Failed to load .env file: %v\n", err)
 	}
 
-	log.Debug("Loading environment variables")
-	if err := dotenv.Viper(); err != nil {
-		log.Fatal("Failed to load .env file", zap.Error(err))
+	ctx := context.Background()
+
+	telemetry := otel_pkg.NewTelemetry(otel_pkg.Config{
+		ServiceName:          "apigateway",
+		ServiceVersion:       "1.0.0",
+		Environment:          "development",
+		Endpoint:             getEnvOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+		Insecure:             true,
+		EnableRuntimeMetrics: true,
+	})
+	if err := telemetry.Init(ctx); err != nil {
+		fmt.Printf("Warning: Failed to initialize telemetry: %v\n", err)
+	}
+
+	log, err := logger.NewLogger("apigateway", telemetry.GetLogger())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create logger: %w", err)
 	}
 
 	log.Debug("Creating gRPC connections...")
@@ -172,15 +185,9 @@ func RunClient() (*Client, func(), error) {
 		return nil, nil, fmt.Errorf("failed to connect services: %w", err)
 	}
 
-	tokenManager, err := auth.NewManager(viper.GetString("SECRET_KEY"), log)
+	tokenManager, err := auth.NewManager(viper.GetString("SECRET_KEY"))
 	if err != nil {
 		log.Fatal("Failed to create token manager", zap.Error(err))
-	}
-
-	ctx := context.Background()
-	shutdownTracer, err := otel_pkg.InitTracerProvider("apigateway", ctx)
-	if err != nil {
-		log.Fatal("Failed to initialize tracer provider", zap.Error(err))
 	}
 
 	myKafka := kafka.NewKafka(log, []string{os.Getenv("KAFKA_BROKERS")})
@@ -231,10 +238,8 @@ func RunClient() (*Client, func(), error) {
 		log.Info("Shutting down GraphQL API Gateway...")
 		closeConnections(conns, log)
 
-		if shutdownTracer != nil {
-			if err := shutdownTracer(context.Background()); err != nil {
-				log.Error("Tracer shutdown failed", zap.Error(err))
-			}
+		if err := telemetry.Shutdown(context.Background()); err != nil {
+			log.Error("Telemetry shutdown failed", zap.Error(err))
 		}
 
 		log.Info("Shutdown complete ✅")
