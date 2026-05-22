@@ -790,58 +790,6 @@ monolith-graphql-paymentgateway-grpc/
 
 ---
 
-## Screenshots
-
-### Database Schema (ERD)
-
-![Payment Gateway Database Schema](./images/Payment%20Gateway.png)
-
-### System Deployments Architecture
-
-#### Local Development Deployment Architecture (Docker Compose)
-
-![Docker Compose Architecture](./images/archictecture_docker_payment_gateway.png)
-
-#### Production Ready Clustering Architecture (Kubernetes)
-
-![Kubernetes Production Architecture](./images/archictecture_kubernetes_payment_gateway.png)
-
-### API Documentation Gateway
-
-#### Unified API Gateway Documentation (Swagger)
-
-![Swagger API Documentation](./images/swagger.png)
-
-### Observability Metrics & Dashboards
-
-The platform features tailored Grafana Dashboards displaying sub-second metrics, transaction rates, memory profiles, cache states, and database logs for every service:
-
-![Auth Service Metrics](./images/auth-service.png)
-<!-- slide -->
-![Card Service Metrics](./images/card-service.png)
-<!-- slide -->
-![Email Service Metrics](./images/email-service.png)
-<!-- slide -->
-![Merchant Service Metrics](./images/merchant-service.png)
-<!-- slide -->
-![Role Service Metrics](./images/role-service.png)
-<!-- slide -->
-![Saldo Service Metrics](./images/saldo-service.png)
-<!-- slide -->
-![Topup Service Metrics](./images/topup-service.png)
-<!-- slide -->
-![Transaction Service Metrics](./images/transaction-service.png)
-<!-- slide -->
-![Transfer Service Metrics](./images/transfer-service.png)
-<!-- slide -->
-![User Service Metrics](./images/user-service.png)
-<!-- slide -->
-![Withdraw Service Metrics](./images/withdraw-service.png)
-<!-- slide -->
-![Node Exporter System Metrics](./images/node-exporter.png)
-
-
----
 
 ## License
 
