@@ -1,333 +1,609 @@
-# Distributed Modular Monolith Payment Gateway — GraphQL & gRPC
+# Distributed Modular Monolith — Payment Gateway Platform
 
-A production-grade **Distributed Modular Monolith Payment Gateway** built with **Go**, exposing a **GraphQL API** to external clients and using **gRPC** for high-performance inter-service communication.
+A production-grade, highly resilient, and fully observable **modular-monolith payment gateway backend** built in **Go (Golang)**. Designed around domain-driven service boundaries following Clean Architecture principles, it retains the operational and deployment simplicity of a single deployment unit while maintaining logical isolation typical of microservices.
 
-The architecture strikes a balance between monolithic simplicity and microservice scalability. All domain modules — Auth, User, Role, Card, Balance, Transaction, Merchant, Transfer, Topup, and Withdraw — live in a single repository but are deployed as independent containers with well-defined boundaries.
+Each financial and identity business domain — Users, Roles, Cards, Merchants, Saldo, Topups, Transactions, Transfers, Withdrawals — lives in its own self-contained module. These modules communicate synchronously via lightweight **gRPC** protocols and asynchronously using **Apache Kafka** event propagation, exposing a unified entry point through a **GraphQL API Gateway** (NGINX + gqlgen).
 
----
-
-## Highlights
-
-| Layer | Technology |
-|---|---|
-| **External API** | GraphQL (gqlgen) |
-| **Inter-Service** | gRPC + Protobuf |
-| **Event Bus** | Apache Kafka |
-| **Database** | PostgreSQL (sqlc) |
-| **Cache / Sessions** | Redis |
-| **Observability** | OpenTelemetry · Prometheus · Grafana · Loki · Jaeger |
-| **Gateway Proxy** | NGINX (reverse proxy / SSL termination) |
-
----
-
-## Architecture
-
-### Design Principles
-
-1. **GraphQL API Gateway** — A single Go service (powered by [gqlgen](https://gqlgen.com/)) receives all client queries and mutations. It validates input, enforces authentication / RBAC, and orchestrates responses by aggregating data from multiple backend gRPC services.
-2. **gRPC Backend Services** — Each domain module exposes strongly-typed Protobuf services. The API Gateway is the sole gRPC client; modules never talk to clients directly.
-3. **Event-Driven Side-Effects** — Kafka decouples write-heavy workflows (settlement, notifications, balance updates) from the request path.
-4. **NGINX Front Proxy** — Handles SSL termination, rate-limiting, and load-balancing before traffic reaches the GraphQL gateway.
-5. **Centralized Observability** — Every service exports metrics, logs, and traces via OpenTelemetry, visualized in Grafana dashboards.
-
-### Request Flow
-
-```
-Client ──▶ NGINX ──▶ GraphQL API Gateway (gqlgen)
-                          │
-                  ┌───────┼────────────────────────────┐
-                  ▼       ▼       ▼       ▼            ▼
-              Auth    User    Card   Transaction   ... (gRPC)
-              gRPC    gRPC    gRPC     gRPC
-                  │       │       │       │
-                  └───────┴───────┴───────┘
-                              │
-                        PostgreSQL / Redis / Kafka
-```
-
-### System Component Diagram (Local Development)
-
-```mermaid
-flowchart TD
-    subgraph Proxy["External Proxy"]
-        NGINX["NGINX (Reverse Proxy)"]
-    end
-
-    subgraph Gateway["GraphQL API Gateway"]
-        APIG["Go API Gateway (gqlgen)"]
-    end
-
-    subgraph CoreServices["Core gRPC Services"]
-        direction TB
-        AS["Auth Service"]
-        US["User Service"]
-        RS["Role Service"]
-        CS["Card Service"]
-        BS["Balance Service"]
-        TS["Transaction Service"]
-        MS["Merchant Service"]
-        TRS["Transfer Service"]
-        TUS["Topup Service"]
-        WS["Withdraw Service"]
-    end
-
-    subgraph Storage["Infrastructure & Storage"]
-        Kafka[("Kafka Broker")]
-        ZK[("Zookeeper")]
-        RedisAPIG[("Redis (Gateway Cache)")]
-        RedisCore[("Redis (Session/Auth)")]
-        DB[("PostgreSQL")]
-    end
-
-    subgraph Observability["Observability Stack"]
-        Promtail["Promtail"]
-        KafkaExporter["Kafka Exporter"]
-        NodeExporter["Node Exporter"]
-        Prometheus["Prometheus"]
-        Loki["Loki"]
-        OtelCollector["OTel Collector"]
-        Grafana["Grafana"]
-        Jaeger["Jaeger"]
-    end
-
-    EmailS["Email Service"]
-    Migration["Migration Service"]
-
-    %% Traffic Flow
-    Client["Client (GraphQL Query/Mutation)"] --> NGINX
-    NGINX --> APIG
-    APIG -->|gRPC| AS & US & RS & CS & BS & TS & MS & TRS & TUS & WS
-    
-    APIG --> RedisAPIG
-
-    TS --> Kafka
-    TS --> EmailS
-    CS --> BS
-    CS --> Kafka
-    US --> RedisCore
-    RS --> RedisCore
-    MS --> EmailS & Kafka
-    BS --> Kafka
-    TRS --> EmailS
-    TUS --> EmailS
-    WS --> EmailS & Kafka
-
-    CoreServices --> DB
-    Migration --> DB
-    Kafka --> ZK
-    CoreServices --> RedisCore
-
-    %% Observability Connections
-    CoreServices & APIG & RedisCore & Kafka --> Prometheus
-    Promtail --> Loki
-    KafkaExporter & NodeExporter --> Prometheus
-    Prometheus & Loki --> Grafana
-    Prometheus --> OtelCollector --> Jaeger
-
-    %% Styling
-    classDef default fill:#282828,stroke:#928374,color:#ebdbb2;
-    classDef proxy fill:#458588,stroke:#83a598,color:#ebdbb2,font-weight:bold;
-    classDef gateway fill:#d79921,stroke:#fabd2f,color:#282828,font-weight:bold;
-    classDef secondary fill:#3c3836,stroke:#7c6f64,color:#ebdbb2;
-    classDef infra fill:#af3a03,stroke:#fe8019,color:#ebdbb2;
-    classDef obs fill:#427b58,stroke:#8ec07c,color:#ebdbb2;
-
-    class NGINX proxy;
-    class APIG gateway;
-    class TS,CS,US,RS,MS,BS,AS,TRS,TUS,WS secondary;
-    class Kafka,ZK,RedisAPIG,RedisCore,DB infra;
-    class Prometheus,Loki,Grafana,Jaeger,OtelCollector,Promtail,KafkaExporter,NodeExporter obs;
-```
-
-### Kubernetes Deployment Topology
-
-```mermaid
-flowchart TD
-    subgraph K8s["Kubernetes Cluster"]
-        subgraph IngressNS["Namespace: ingress"]
-            NGINX["Ingress Controller (NGINX)"]
-        end
-
-        subgraph GatewayNS["Namespace: gateway"]
-            APIG["GraphQL Gateway Pods (gqlgen)"]
-        end
-
-        subgraph CoreNS["Namespace: core-services"]
-            direction LR
-            Services["Core gRPC Service Pods\n(Auth, User, Transaction, etc.)"]
-        end
-
-        subgraph InfraNS["Namespace: infra"]
-            Kafka["Kafka\n(StatefulSet)"]
-            Redis["Redis\n(StatefulSet)"]
-            DB["PostgreSQL\n(StatefulSet)"]
-        end
-
-        subgraph ObsNS["Namespace: observability"]
-            Prometheus["Prometheus"]
-            Loki["Loki"]
-            Grafana["Grafana"]
-            Jaeger["Jaeger"]
-        end
-    end
-
-    NGINX --> APIG
-    APIG --> Services
-    Services --> Kafka & Redis & DB
-    Services & APIG & Kafka & Redis --> Prometheus
-    Prometheus & Loki --> Grafana
-
-    classDef k8s fill:#458588,stroke:#ebdbb2,color:#ebdbb2,font-weight:bold;
-    classDef ns fill:#282828,stroke:#928374,color:#ebdbb2,stroke-dasharray: 5 5;
-    
-    class K8s k8s;
-    class IngressNS,GatewayNS,CoreNS,InfraNS,ObsNS ns;
-```
-
----
-
-## GraphQL Schema
-
-The API Gateway exposes a rich, strongly-typed GraphQL API. Schema files live in `service/apigateway/graphql/`:
-
-| Schema File | Domain | Operations |
-|---|---|---|
-| `auth.graphqls` | Authentication | Login, Register, Refresh Token, Forgot/Reset Password, Verify Code |
-| `user.graphqls` | Users | CRUD, Profile lookup |
-| `role.graphqls` | Roles & RBAC | Role management with Redis-cached permission lookups |
-| `card.graphqls` | Cards | Card lifecycle, dashboard stats, balance/topup/transaction/transfer/withdraw analytics |
-| `saldo.graphqls` | Balance | Balance queries, stats, total balance aggregations |
-| `transaction.graphqls` | Transactions | Payment creation/settlement/refund, monthly/yearly analytics by method/status/amount |
-| `merchant.graphqls` | Merchants | Onboarding, verification, transaction stats |
-| `merchantdocument.graphqls` | Merchant Docs | Document upload/management |
-| `topup.graphqls` | Top-up | Account funding, stats by amount/method/status |
-| `transfer.graphqls` | Transfer | P2P & merchant transfers, analytics |
-| `withdraw.graphqls` | Withdrawal | Withdraw management, stats by amount/status |
-| `common.graphqls` | Shared Types | `PaginationMeta` and other common types |
-
-### Example Query
-
-```graphql
-query {
-  findAllTransaction(input: { page: 1, page_size: 10, search: "" }) {
-    status
-    message
-    data {
-      id
-      card_number
-      transaction_no
-      amount
-      payment_method
-      merchant_id
-      transaction_time
-    }
-    pagination {
-      current_page
-      page_size
-      total_pages
-      total_records
-    }
-  }
-}
-```
-
-### Example Mutation
-
-```graphql
-mutation {
-  loginUser(input: { email: "user@example.com", password: "secret" }) {
-    status
-    message
-    data {
-      access_token
-      refresh_token
-    }
-  }
-}
-```
-
----
-
-## gRPC Services (Backend)
-
-Each domain module runs as an independent gRPC server. Proto definitions are located in `proto/` and generated Go code in `pb/`.
-
-| Service | Proto | gRPC Interfaces |
-|---|---|---|
-| Auth | `auth.proto` | `AuthService` |
-| User | `user/` | `UserQueryService`, `UserCommandService` |
-| Role | `role/` | `RoleService`, `RoleCommandService` |
-| Card | `card/` | `CardQueryService`, `CardCommandService`, `CardDashboardService`, + Stats services |
-| Merchant | `merchant/` | `MerchantQueryService`, `MerchantCommandService`, `MerchantTransactionService`, + Stats services |
-| Merchant Document | `merchant_document/` | `MerchantDocumentQueryService`, `MerchantDocumentCommandService` |
-| Balance (Saldo) | `saldo/` | `SaldoQueryService`, `SaldoCommandService`, + Stats services |
-| Topup | `topup/` | `TopupQueryService`, `TopupCommandService`, + Stats services |
-| Transaction | `transaction/` | `TransactionQueryService`, `TransactionCommandService`, + Stats services |
-| Transfer | `transfer/` | `TransferQueryService`, `TransferCommandService`, + Stats services |
-| Withdraw | `withdraw/` | `WithdrawQueryService`, `WithdrawCommandService`, + Stats services |
+The platform is fortified with a **comprehensive observability suite** (Prometheus, Grafana, Loki, Jaeger, OpenTelemetry, Pyroscope), robust connection pooling via **PgBouncer**, **isolated Redis caching** with custom telemetry for each service, and Kubernetes configurations ready for production auto-scaling.
 
 ---
 
 ## Key Features
 
-### Authentication & Access Control
-*   JWT-based authentication with access + refresh token pairs.
-*   Granular Role-Based Access Control (RBAC) — Admin, Merchant, Customer, System roles.
-*   Kafka-driven permission resolution with Redis caching for low-latency lookups.
-
-### Card & Balance Management
-*   Full card lifecycle management (registration, activation, deactivation).
-*   Event-driven balance updates triggered by card activities via Kafka.
-*   Dashboard analytics: balance stats, topup/transfer/withdraw/transaction amounts per card.
-
-### Transaction Processing
-*   Comprehensive payment creation, settlement, and refund workflows.
-*   Merchant API key validation with Kafka-based permission checks.
-*   Monthly/yearly analytics by payment method, status (success/failed), and amount.
-*   Real-time transaction confirmations delivered via email.
-
-### Financial Operations
-*   Peer-to-peer and merchant transfer services.
-*   Account funding via dedicated top-up services.
-*   Merchant and customer withdrawal management.
-*   Automated email notifications for all financial operations.
-
-### Merchant Services
-*   Onboarding and verification workflows with document management.
-*   Automated status updates and document processing.
-*   Integrated settlement flows connected to Transaction and Balance services.
-
-### Event-Driven Architecture
-*   Decoupled service interaction using Kafka.
-*   Background processing for non-blocking operations (settlements, notifications).
-*   Optimized data access using Redis caching.
-
-### System Observability
-*   Standardized metrics collection via Prometheus.
-*   Log aggregation and querying using Promtail and Loki.
-*   Distributed tracing with OpenTelemetry and Jaeger.
-*   Pre-configured Grafana dashboards for system health visualization.
+| Domain | Capabilities |
+| :--- | :--- |
+| **Auth & Users** | Secure registration, multi-factor login, stateless JWT access/refresh token lifecycle, password reset workflows, OTP email verification, and `GetMe` profile resolver. |
+| **Roles & RBAC** | Custom permission configuration, granular access control matrices, and sub-second permission evaluation cached via Redis. |
+| **Cards & VCC** | Virtual and debit card CRUD operations with soft-delete capabilities, card activation/suspension toggles, and multi-dimensional transaction analytics (daily/monthly/yearly topup, withdraw, transfer). |
+| **Merchants** | Fully featured merchant onboarding, profile details management, business data registration, and merchant performance/transaction reports with full data restoration capabilities (soft delete & restore). |
+| **Saldo (Balance)** | High-throughput, thread-safe real-time balance calculations, optimistic concurrency locks, and localized balances. |
+| **Topup** | Balance loading ledger engine supporting multiple payment methods, detailed transactions logging, and soft-delete audit records. |
+| **Transaction** | Centralized financial audit ledger collecting transaction events across the system, global search filters, status tracking, and monthly/yearly volume reports. |
+| **Transfer** | Safe peer-to-peer card-to-card or user-to-user funds settlement with balance debit/credit synchronization and event-driven logging. |
+| **Withdraw** | Funds settlement from user cards to external accounts/banks, daily transaction threshold limits, and status processing pipelines. |
+| **Email Worker** | Kafka-driven asynchronous worker dispatching critical notification emails (OTPs, login alerts, merchant onboarding notices, and transfer/topup invoices) via SMTP. |
+| **Observability** | Multi-dimensional metrics (Prometheus + Grafana), log aggregation (Loki + Promtail), end-to-end distributed tracing (Jaeger + OpenTelemetry), continuous CPU/Memory profiling (Pyroscope), and resource monitors (Node, Kafka, Postgres Exporters). |
+| **Deployment** | Local orchestration using Docker Compose (featuring individual Redis instances and PgBouncer), and auto-scaling Kubernetes manifests configured with Horizontal Pod Autoscalers (HPA). |
 
 ---
 
-## Technical Stack
+## Architecture Overview
 
-| Category | Technologies |
-|---|---|
-| **Language** | Go (Golang) |
-| **External API** | GraphQL ([gqlgen](https://gqlgen.com/)) |
-| **Inter-Service** | gRPC + Protocol Buffers |
-| **Event Streaming** | Apache Kafka |
-| **Database** | PostgreSQL |
-| **SQL Codegen** | sqlc |
-| **Migrations** | Goose |
-| **Cache / Sessions** | Redis |
-| **Observability** | OpenTelemetry, Prometheus, Grafana, Loki, Promtail, Jaeger |
-| **Logging** | Zap (structured) |
-| **Validation** | go-playground/validator |
-| **Reverse Proxy** | NGINX |
-| **Containerization** | Docker, Docker Compose |
-| **Orchestration** | Kubernetes (Minikube for local) |
+The platform implements a **Distributed Modular Monolith** architecture. Each business service is logical, decoupled, and self-contained inside the `service/` directory, possessing its own independent gRPC boundary. An **API Gateway** (gqlgen + NGINX) acts as the unified edge router, transforming client GraphQL queries and mutations into fast gRPC downstream communications.
+
+### Core Architecture Principles
+
+- **Domain-Driven Boundary Isolation**: Every service owns its database access, caching layers, and service logic, strictly forbidding cross-boundary database sharing.
+- **Clean Architecture**: Standardized layers of `handler → service → repository` ensure that business domains remain unaffected by framework or database changes.
+- **PgBouncer Pooling**: Employs connection pooling to avoid PostgreSQL socket exhaustion across the multiple concurrent modular services.
+- **Event-Driven Resilience**: Apache Kafka decouples transaction events, ensuring side effects like email billing remain completely non-blocking.
+- **OTel Telemetry Integration**: Standardized OpenTelemetry middleware injects trace IDs across gRPC boundaries, allowing seamless trace propagation from the client GraphQL edge down to postgres operations.
+
+```mermaid
+graph TB
+    classDef client fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:2px,font-weight:bold
+    classDef gateway fill:#1e293b,stroke:#22d3ee,color:#cffafe,stroke-width:2px,font-weight:bold
+    classDef domain fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff,stroke-width:1.5px
+    classDef infra fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1.5px
+    classDef obs fill:#052e16,stroke:#4ade80,color:#dcfce7,stroke-width:1.5px
+    classDef event fill:#431407,stroke:#fb923c,color:#fed7aa,stroke-width:1.5px
+
+    Client["Client Applications<br/>(Web / Mobile / API)"]:::client
+
+    subgraph APIGateway["API Gateway — NGINX + gqlgen"]
+        direction LR
+        GraphQL["GraphQL Endpoint<br/>/query"]
+        Playground["GraphQL Playground<br/>/"]
+        AuthMW["JWT Auth<br/>Middleware"]
+    end
+    class APIGateway gateway
+
+    Client --> APIGateway
+
+    subgraph BusinessServices["Business Domain Services"]
+        direction TB
+
+        subgraph IdentityDomain["Identity & Access"]
+            AUTH["Auth Service<br/>JWT & OTP Verification"]
+            USER["User Service<br/>Profile Management"]
+            ROLE["Role Service<br/>RBAC & Permissions"]
+        end
+
+        subgraph MerchantDomain["Merchant Management"]
+            MERCH["Merchant Service<br/>Onboarding & Profiling"]
+        end
+
+        subgraph FinanceDomain["Finance & Ledger Suite"]
+            CARD["Card Service<br/>VCC & Card Analytics"]
+            SALDO["Saldo Service<br/>Real-time Balance Tracker"]
+        end
+
+        subgraph TransactionDomain["Transfers & Transactions"]
+            TOPUP["Topup Service<br/>Balance Funding Engine"]
+            TXN["Transaction Service<br/>Central Audit Register"]
+            TRANSFER["Transfer Service<br/>P2P Card-to-Card Transfer"]
+            WITHDRAW["Withdraw Service<br/>Outbound Fund Settlement"]
+        end
+    end
+    class BusinessServices domain
+
+    APIGateway -->|"gRPC"| BusinessServices
+
+    subgraph Infrastructure["Infrastructure Layer"]
+        direction LR
+        PGBOUNCER["PgBouncer<br/>Connection Pooler :6432"]
+        PG[("PostgreSQL<br/>PAYMENT_GATEWAY DB")]
+        REDIS[("Redis Cache Cluster<br/>11 Isolated Databases")]
+        KAFKA[("Kafka<br/>Event Bus")]
+        PYRO["Pyroscope<br/>Continuous Profiler"]
+    end
+    class Infrastructure infra
+
+    BusinessServices -->|"gRPC / SQL"| PGBOUNCER
+    PGBOUNCER --> PG
+    BusinessServices -->|"Cache / Invalidate"| REDIS
+    BusinessServices -->|"Publish Events"| KAFKA
+    BusinessServices -.->|"Profile Data"| PYRO
+
+    subgraph EventConsumers["Event-Driven Consumers"]
+        EMAIL["Email Service<br/>SMTP Notification Worker"]
+    end
+    class EventConsumers event
+
+    KAFKA -->|"Consume Events"| EMAIL
+
+    subgraph Observability["Observability Stack"]
+        direction LR
+        PROM["Prometheus<br/>Metrics Engine"]
+        LOKI["Loki<br/>Log Aggregator"]
+        JAEGER["Jaeger<br/>Distributed Traces"]
+        GRAFANA["Grafana<br/>Unified Dashboards"]
+        OTEL["OTel Collector<br/>Telemetry Pipeline"]
+        PROMTAIL["Promtail<br/>Log Shipper"]
+        NODEX["Node Exporter<br/>System Metrics"]
+        KAFKAX["Kafka Exporter<br/>Broker Metrics"]
+        PGX["Postgres Exporter<br/>DB Performance"]
+    end
+    class Observability obs
+
+    BusinessServices -.->|"/metrics"| PROM
+    BusinessServices -.->|"Traces"| OTEL
+    OTEL -.-> JAEGER
+    PROMTAIL -.-> LOKI
+    NODEX -.-> PROM
+    KAFKAX -.-> PROM
+    PGX -.-> PROM
+    PROM -.-> GRAFANA
+    LOKI -.-> GRAFANA
+    JAEGER -.-> GRAFANA
+```
+
+---
+
+## Service Catalog
+
+The modular architecture consists of **12 logical micro-applications** plus supporting database and migrations:
+
+```mermaid
+graph LR
+    classDef svc fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe,stroke-width:1px,rx:8
+    classDef gw fill:#1e293b,stroke:#22d3ee,color:#cffafe,stroke-width:2px,rx:8,font-weight:bold
+    classDef support fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px,rx:8
+
+    subgraph Gateway
+        API["API Gateway<br/>gqlgen + GraphQL + Playground"]:::gw
+    end
+
+    subgraph Identity["Identity & Access (3)"]
+        A1["auth"]:::svc
+        A2["user"]:::svc
+        A3["role"]:::svc
+    end
+
+    subgraph Merchant["Merchant Suite (1)"]
+        M1["merchant"]:::svc
+    end
+
+    subgraph Finance["Finance & Card Suite (2)"]
+        F1["card"]:::svc
+        F2["saldo"]:::svc
+    end
+
+    subgraph Movements["Fund Transactions (4)"]
+        T1["topup"]:::svc
+        T2["transaction"]:::svc
+        T3["transfer"]:::svc
+        T4["withdraw"]:::svc
+    end
+
+    subgraph Support["Support Services (2)"]
+        S1["email"]:::support
+        S2["migrate"]:::support
+    end
+
+    API --> Identity
+    API --> Merchant
+    API --> Finance
+    API --> Movements
+```
+
+---
+
+## Internal Service Architecture
+
+Every logical business service is mapped as a decoupled submodule following structured clean architecture rules.
+
+```mermaid
+graph TB
+    classDef handler fill:#1e3a5f,stroke:#7dd3fc,color:#e0f2fe,stroke-width:1.5px
+    classDef service fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe,stroke-width:1.5px
+    classDef repo fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1.5px
+    classDef infra fill:#052e16,stroke:#4ade80,color:#dcfce7,stroke-width:1.5px
+    classDef shared fill:#431407,stroke:#fb923c,color:#fed7aa,stroke-width:1.5px
+
+    subgraph Service["service/<name>/"]
+        direction TB
+
+        CMD["cmd/main.go or main.go<br/>Entry Point"]
+
+        subgraph Internal["internal/"]
+            direction TB
+            APPS["app/client.go or server.go<br/>Dependency Wiring"]:::handler
+            HANDLER["handler/<br/>gRPC Handlers"]:::handler
+            MW["middleware/<br/>Interceptors"]:::handler
+            SVC["service/<br/>Business Logic"]:::service
+            CACHE["cache/<br/>Redis Cache Layer"]:::service
+            REPO["repository/<br/>Data Access (sqlc)"]:::repo
+        end
+
+        CMD --> APPS
+        APPS --> HANDLER
+        APPS --> SVC
+        APPS --> CACHE
+        APPS --> REPO
+        HANDLER --> SVC
+        SVC --> REPO
+        SVC --> CACHE
+    end
+
+    subgraph SharedLibs["shared/ — Shared Libraries"]
+        direction LR
+        DOMAIN["domain/<br/>record / requests / response"]:::shared
+        OBS["observability/<br/>cache_metrics / tracing_metrics"]:::shared
+        CACHESHARED["cache/<br/>redis_cache.go"]:::shared
+        PB["pb/<br/>Protobuf Generated Code"]:::shared
+        MAPPER["mapper/<br/>Domain ↔ Proto"]:::shared
+        ERRORS["errors/ + errorhandler/"]:::shared
+    end
+
+    subgraph PkgLibs["pkg/ — Platform Libraries"]
+        direction LR
+        PKGAUTH["auth/<br/>JWT Manager"]:::infra
+        PKGKAFKA["kafka/<br/>Producer / Consumer"]:::infra
+        PKGOTEL["otel/<br/>Tracing + Metrics Init"]:::infra
+        PKGRES["resilience/<br/>Circuit Breaker<br/>Rate Limiter<br/>Load Monitor"]:::infra
+        PKGLOG["logger/<br/>Zap Structured Logging"]:::infra
+        PKGSRV["server/<br/>gRPC Server Bootstrap"]:::infra
+        PKGDB["database/<br/>PostgreSQL connection"]:::infra
+    end
+
+    REPO --> DOMAIN
+    REPO --> PB
+    SVC --> DOMAIN
+    SVC --> OBS
+    HANDLER --> PB
+    HANDLER --> MAPPER
+    APPS --> PKGSRV
+    APPS --> PKGOTEL
+    APPS --> CACHESHARED
+    APPS --> OBS
+```
+
+---
+
+## Data & Event Flow
+
+### Synchronous Flow (gRPC & Cache Read-Through)
+
+All external client API requests go through GraphQL queries or mutations. The API Gateway authorizes the JWT, connects with the correct downstream gRPC modular server, checks Redis caching, and fetches PostgreSQL through PgBouncer if a cache miss happens.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant GW as API Gateway<br/>(gqlgen + GraphQL)
+    participant SVC as Domain Service<br/>(gRPC Server)
+    participant REDIS as Redis Database
+    participant PGB as PgBouncer
+    participant DB as PostgreSQL
+
+    C->>GW: GraphQL Request (Query/Mutation)
+    GW->>GW: JWT Authentication Check
+    GW->>SVC: gRPC Call (Protobuf payload)
+    SVC->>REDIS: Check Cache
+    alt Cache Hit
+        REDIS-->>SVC: Return Cached Response
+    else Cache Miss
+        SVC->>PGB: Acquire Connection
+        PGB->>DB: SQL Query execution
+        DB-->>PGB: DB Result Set
+        PGB-->>SVC: SQL rows mapped
+        SVC->>REDIS: Populate Cache for next read
+    end
+    SVC-->>GW: gRPC Response payload
+    GW-->>C: GraphQL Response (JSON format)
+```
+
+### Asynchronous Flow (Kafka Notification Event pipeline)
+
+High-performance transaction modifications (like transfers or top-ups) trigger background notification events published directly to Apache Kafka brokers. The isolated Email service listens to Kafka, maps the events, and contacts Ethereal/SMTP services.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SVC as Transaction / Topup / Transfer
+    participant K as Kafka Broker
+    participant EMAIL as Email Worker Service
+    participant SMTP as SMTP Server
+
+    SVC->>K: Publish Event (e.g. transfer.created / topup.success)
+    K-->>EMAIL: Deliver topic payload (asynchronous consumer)
+    EMAIL->>EMAIL: Map payload details
+    EMAIL->>SMTP: Send custom styled notification
+    SMTP-->>EMAIL: Delivery Confirmation
+```
+
+---
+
+## Observability Architecture
+
+```mermaid
+graph TB
+    classDef service fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff,stroke-width:1.5px
+    classDef collector fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1.5px
+    classDef storage fill:#052e16,stroke:#4ade80,color:#dcfce7,stroke-width:1.5px
+    classDef viz fill:#431407,stroke:#fb923c,color:#fed7aa,stroke-width:2px,font-weight:bold
+
+    subgraph Sources["Telemetry Sources"]
+        direction TB
+        SVCS["All Business Services<br/>(11 services)"]:::service
+        KAFKA_SRC["Kafka Broker"]:::service
+        NODES["Host / Node"]:::service
+        DB_SRC["PostgreSQL Engine"]:::service
+    end
+
+    subgraph Collectors["Collection Layer"]
+        direction TB
+        PROM["Prometheus<br/>Scrapes /metrics"]:::collector
+        PROMTAIL["Promtail<br/>Ships container logs"]:::collector
+        OTEL["OTel Collector<br/>Receives OTLP spans"]:::collector
+        NODEX["Node Exporter<br/>CPU / Memory / Disk / Net"]:::collector
+        KAFKAX["Kafka Exporter<br/>Topic lag / Broker health"]:::collector
+        PGX["Postgres Exporter<br/>PgBouncer & Query performance"]:::collector
+    end
+
+    subgraph Storage["Storage Layer"]
+        direction TB
+        PROM_TSDB["Prometheus TSDB<br/>(Metrics)"]:::storage
+        LOKI_STORE["Loki<br/>(Log Index + Chunks)"]:::storage
+        JAEGER_STORE["Jaeger<br/>(Trace Storage)"]:::storage
+    end
+
+    subgraph Visualization["Visualization & Alerting"]
+        GRAFANA["Grafana<br/>Unified Dashboards"]:::viz
+        ALERTMGR["Alertmanager<br/>Alert Routing"]:::viz
+    end
+
+    SVCS -->|"/metrics"| PROM
+    SVCS -->|"OTLP gRPC"| OTEL
+    SVCS -->|"stdout/stderr"| PROMTAIL
+    NODES --> NODEX
+    KAFKA_SRC --> KAFKAX
+    DB_SRC --> PGX
+
+    NODEX --> PROM
+    KAFKAX --> PROM
+    PGX --> PROM
+    PROM --> PROM_TSDB
+    PROMTAIL --> LOKI_STORE
+    OTEL --> JAEGER_STORE
+
+    PROM_TSDB --> GRAFANA
+    LOKI_STORE --> GRAFANA
+    JAEGER_STORE --> GRAFANA
+    PROM_TSDB --> ALERTMGR
+```
+
+| Pillar | Tool | Purpose |
+| :--- | :--- | :--- |
+| **Metrics** | Prometheus + Grafana | Core metrics tracking (CPU, memory, request error rates, gRPC latencies, DB connection states). |
+| **Logging** | Loki + Promtail | Centralized structured JSON logger for indexing logs by service, queryable via LogQL. |
+| **Tracing** | OpenTelemetry + Jaeger | Distributed system tracing across API gateway and internal gRPC services. |
+| **Profiling** | Pyroscope | Continuous memory/CPU profiling to eliminate allocation memory leaks in transaction loops. |
+| **Alerting** | Alertmanager | Automated notification system triggered during latency hikes or service disconnects. |
+
+---
+
+## Deployment Architectures
+
+### Docker Compose (Local Development)
+
+The Docker Compose configuration provisions 11 isolated database setups inside a single containerized environment to replicate real microservices patterns.
+
+```mermaid
+flowchart TD
+    classDef gateway fill:#1e293b,stroke:#22d3ee,color:#cffafe,stroke-width:2px,font-weight:bold
+    classDef core fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe,stroke-width:1.5px
+    classDef infra fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1.5px
+    classDef obs fill:#052e16,stroke:#4ade80,color:#dcfce7,stroke-width:1.5px
+    classDef event fill:#431407,stroke:#fb923c,color:#fed7aa,stroke-width:1.5px
+
+    subgraph DockerCompose["docker-compose.yml — Local Environment"]
+
+        subgraph Gateway["API Gateway"]
+            NGINX["NGINX Proxy :80"]
+            APIGW["API Gateway Container<br/>gqlgen + GraphQL :5000"]
+        end
+        class Gateway gateway
+
+        subgraph Services["Core Service Containers"]
+            subgraph Identity["Identity & Access"]
+                AUTH["auth-service"]
+                USER["user-service"]
+                ROLE["role-service"]
+            end
+
+            subgraph MerchantSuite["Merchant Domain"]
+                MERCH["merchant-service"]
+            end
+
+            subgraph FinanceSuite["Finance & Card"]
+                CARD["card-service"]
+                SALDO["saldo-service"]
+            end
+
+            subgraph MovementsSuite["Fund Movements"]
+                TOPUP["topup-service"]
+                TXN["transaction-service"]
+                TRANSFER["transfer-service"]
+                WITHDRAW["withdraw-service"]
+            end
+        end
+        class Services core
+
+        subgraph Infra["Infrastructure Suite"]
+            PG[("PostgreSQL :5432")]
+            PGB[("PgBouncer :6432")]
+            REDIS_APIGW[("redis-apigateway :6379")]
+            REDIS_AUTH[("redis-auth :6380")]
+            REDIS_USER[("redis-user :6381")]
+            REDIS_CARD[("redis-card :6382")]
+            REDIS_MERCH[("redis-merchant :6383")]
+            REDIS_ROLE[("redis-role :6384")]
+            REDIS_SALDO[("redis-saldo :6385")]
+            REDIS_TXN[("redis-transaction :6386")]
+            REDIS_TOPUP[("redis-topup :6387")]
+            REDIS_TRANS[("redis-transfer :6388")]
+            REDIS_WITHDRAW[("redis-withdraw :6389")]
+            KAFKA[("Kafka Broker :9092")]
+            PYRO[("Pyroscope :4040")]
+        end
+        class Infra infra
+
+        subgraph Obs["Observability Stack"]
+            PROM["Prometheus :9090"]
+            GRAFANA["Grafana :3000"]
+            LOKI["Loki :3100"]
+            JAEGER["Jaeger :16686"]
+            OTEL["OTel Collector :4317"]
+            NODEX["Node Exporter"]
+            KAFKAX["Kafka Exporter"]
+            PGX["Postgres Exporter"]
+            PROMTAIL["Promtail Log Shipper"]
+        end
+        class Obs obs
+
+        subgraph Events["Event Consumers"]
+            EMAIL["Email Worker"]
+        end
+        class Events event
+    end
+
+    NGINX --> APIGW
+    APIGW -->|"gRPC"| Services
+    Services -->|"gRPC/SQL"| PGB
+    PGB --> PG
+    Services --> KAFKA
+    KAFKA --> EMAIL
+
+    AUTH --> REDIS_AUTH
+    USER --> REDIS_USER
+    CARD --> REDIS_CARD
+    MERCH --> REDIS_MERCH
+    ROLE --> REDIS_ROLE
+    SALDO --> REDIS_SALDO
+    TOPUP --> REDIS_TOPUP
+    TXN --> REDIS_TXN
+    TRANSFER --> REDIS_TRANS
+    WITHDRAW --> REDIS_WITHDRAW
+    APIGW --> REDIS_APIGW
+
+    Services -.->|"Metrics"| PROM
+    Services -.->|"Traces"| OTEL
+    Services -.->|"Profiles"| PYRO
+    OTEL -.-> JAEGER
+    PROMTAIL -.-> LOKI
+    PROM -.-> GRAFANA
+    LOKI -.-> GRAFANA
+```
+
+### Kubernetes (Production Ready)
+
+Our enterprise Kubernetes infrastructure resides inside the dedicated `payment-gateway` namespace, configuring scalable nodes utilizing Horizontal Pod Autoscalers.
+
+```mermaid
+flowchart TD
+    classDef k8s fill:#0c1222,stroke:#38bdf8,color:#e0f2fe,stroke-width:2px,font-weight:bold
+    classDef pod fill:#1e1b4b,stroke:#a78bfa,color:#ede9fe,stroke-width:1.5px
+    classDef hpa fill:#3b0764,stroke:#c084fc,color:#f3e8ff,stroke-width:1px,font-style:italic
+    classDef infra fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1.5px
+    classDef obs fill:#052e16,stroke:#4ade80,color:#dcfce7,stroke-width:1.5px
+    classDef job fill:#431407,stroke:#fb923c,color:#fed7aa,stroke-width:1.5px
+
+    subgraph K8S["Kubernetes Cluster — namespace: payment-gateway"]
+
+        subgraph Ingress["Ingress Controller"]
+            NGINX["NGINX Ingress<br/>+ TLS Termination"]:::k8s
+        end
+
+        subgraph CorePods["Core Service Pods + HPAs"]
+            direction TB
+
+            subgraph IdentityPods["Identity Suite"]
+                AUTH["auth-pod"]:::pod
+                USER["user-pod"]:::pod
+                ROLE["role-pod"]:::pod
+                AUTH_HPA["↕ HPA"]:::hpa
+                USER_HPA["↕ HPA"]:::hpa
+            end
+
+            subgraph MerchPods["Merchant Domain"]
+                MERCH["merchant-pod"]:::pod
+            end
+
+            subgraph FinancePods["Finance & Ledger"]
+                CARD["card-pod"]:::pod
+                SALDO["saldo-pod"]:::pod
+            end
+
+            subgraph TransPods["Transaction Engine"]
+                TOPUP["topup-pod"]:::pod
+                TXN["transaction-pod"]:::pod
+                TRANSFER["transfer-pod"]:::pod
+                WITHDRAW["withdraw-pod"]:::pod
+            end
+        end
+
+        subgraph InfraPods["Infrastructure Pods"]
+            PG[("PostgreSQL DB + PVC")]:::infra
+            PGB["PgBouncer Daemon"]:::infra
+            REDIS_CLUSTER[("Redis Cluster + PVC")]:::infra
+            KAFKA[("Kafka StatefulSet")]:::infra
+        end
+
+        subgraph ObsPods["Observability Pods"]
+            PROM["Prometheus Pod"]:::obs
+            GRAFANA["Grafana Pod"]:::obs
+            LOKI["Loki Pod + PVC"]:::obs
+            PROMTAIL["Promtail DaemonSet"]:::obs
+            JAEGER["Jaeger Pod"]:::obs
+            OTEL["OTel Collector Pod"]:::obs
+            NODEX["Node Exporter DaemonSet"]:::obs
+            ALERTMGR["Alertmanager Pod"]:::obs
+            PYRO["Pyroscope Pod"]:::obs
+        end
+
+        subgraph Jobs["Jobs & Workers"]
+            MIGRATE["Migration Job"]:::job
+            EMAIL["Email Worker Pod"]:::job
+        end
+    end
+
+    NGINX --> APIGW
+    CorePods --> PGB
+    PGB --> PG
+    CorePods --> REDIS_CLUSTER
+    CorePods --> KAFKA
+    KAFKA --> EMAIL
+
+    CorePods -.->|"/metrics"| PROM
+    CorePods -.->|"OTLP"| OTEL
+    OTEL -.-> JAEGER
+    PROMTAIL -.-> LOKI
+    PROM -.-> GRAFANA
+    MIGRATE --> PG
+```
+
+---
+
+## Technology Stack
+
+| Category | Selected Technologies | Purpose |
+| :--- | :--- | :--- |
+| **Language** | Go (Golang v1.25) | High-performance compiled concurrent backend execution. |
+| **API Edge Gateway** | gqlgen (GraphQL) | Modern, strongly typed API Gateway engine and playground. |
+| **RPC Inter-service** | gRPC + Protobuf | Blazing fast, contract-first synchronous communications. |
+| **Database** | PostgreSQL v17 | Safe ACID ledger persistent storage system. |
+| **Database Gateway**| PgBouncer | Extreme-efficiency PostgreSQL socket connection pooler. |
+| **Type-Safe SQL** | sqlc | Code generator translating strict raw SQL queries into Go code. |
+| **DB Migrations** | Goose | Incremental database schema version manager. |
+| **Caching Tier** | Redis | Multi-database low-latency key-value cached engine. |
+| **Messaging Stream** | Apache Kafka | Asynchronous high-throughput messaging event bus. |
+| **Token Manager** | JWT | Secure stateless request authentication standard. |
+| **Observability** | OpenTelemetry + Jaeger | Vendor-neutral distributed telemetry pipeline and visualization. |
+| **Continuous Profiler**| Pyroscope | Real-time memory allocation tracker to identify hot paths. |
+| **Docker Engine** | Compose | Local environment virtualization orchestration. |
+| **Orchestrator** | Kubernetes | Production-scale auto-scaling pod clustering infrastructure. |
 
 ---
 
@@ -335,195 +611,245 @@ Each domain module runs as an independent gRPC server. Proto definitions are loc
 
 ### Prerequisites
 
-*   Git
-*   Go 1.20+
-*   Docker & Docker Compose
-*   Make (or [just](https://github.com/casey/just))
-*   `protoc` with Go/gRPC plugins (for proto generation)
+Ensure the following system packages are locally configured:
 
-### Installation
+- [Git](https://git-scm.com/)
+- [Go](https://go.dev/) (v1.23+)
+- [Docker](https://www.docker.com/) & [Docker Compose](https://docs.docker.com/compose/)
+- [Just Task Runner](https://github.com/casey/just) or Standard `Make`
+- [Protobuf Compiler](https://grpc.io/docs/protoc-installation/) (for codegen updates)
 
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/MamangRust/monolith-graphql-payment-gateway-grpc.git
-    cd monolith-graphql-payment-gateway-grpc
-    ```
+### 1. Clone the Workspace
 
-2.  **Environment Configuration**
-    *   Create a `.env` file in the root directory for general settings.
-    *   Create a `docker.env` file in `deployments/local/` for Docker-specific configurations.
+```sh
+git clone https://github.com/MamangRust/monolith-graphql-paymentgateway-grpc.git
+cd monolith-graphql-paymentgateway-grpc
+```
 
-3.  **Run the Application**
-    Initialize the infrastructure and start the services:
-    ```bash
-    make build-up
-    ```
+### 2. Prepare Environment Configurations
 
-4.  **Database Migration**
-    Apply the database schema:
-    ```bash
-    make migrate
-    ```
+Setup the system configurations from placeholders:
 
-5.  **Seed Data (Optional)**
-    Populate the database with initial test data:
-    ```bash
-    make seeder
-    ```
+```sh
+# Copy root variables
+cp .env.example .env
 
-6.  **Access GraphQL Playground**
-    Once the API Gateway is running, open the GraphQL Playground in your browser:
-    ```
-    http://localhost:<GATEWAY_PORT>/
-    ```
-    The gqlgen playground provides interactive schema exploration, auto-complete, and query execution.
+# Copy local docker settings overrides
+cp deployments/local/docker.env.example deployments/local/docker.env
+```
 
-Check service status using `make ps`.
+### 3. Start Local Environment (Docker Compose)
 
-### Stopping the Application
+Launch all infrastructure utilities, telemetry containers, and application submodules:
 
-```bash
+```sh
+# Compile Docker images & boot Compose layers
+make build-up
+# Or using Just:
+just build-up
+
+# Execute Goose migration scripts
+make migrate
+# Or using Just:
+just migrate
+
+# (Optional) Insert development mock data into DB
+make seeder
+# Or using Just:
+just seeder
+```
+
+Ensure everything has booted successfully:
+
+```sh
+make ps
+# Or using Just:
+just ps
+```
+
+### 4. Port Map Registry
+
+| Application/Service | Port Configuration / URL |
+| :--- | :--- |
+| **GraphQL Playground Edge** | [http://localhost](http://localhost) |
+| **GraphQL Endpoint Edge** | [http://localhost/query](http://localhost/query) |
+| **API Gateway Direct** | [http://localhost:5000](http://localhost:5000) |
+| **API Gateway Direct Query** | [http://localhost:5000/query](http://localhost:5000/query) |
+| **Grafana Dashboard Portal** | [http://localhost:3000](http://localhost:3000) *(Credentials: `admin`/`admin`)* |
+| **Prometheus Telemetry** | [http://localhost:9090](http://localhost:9090) |
+| **Jaeger Distributed Tracing** | [http://localhost:16686](http://localhost:16686) |
+| **Pyroscope Profiling Panel** | [http://localhost:4040](http://localhost:4040) |
+| **PgBouncer Gateway Node** | `localhost:6432` |
+| **PostgreSQL Database Engine** | `localhost:5432` |
+
+To fully stop the development system:
+
+```sh
 make down
+# Or using Just:
+just down
 ```
 
 ---
 
-## Project Structure
+## Makefile / Justfile Reference
+
+The workspace includes a standard `Makefile` and `justfile` featuring mirroring tasks:
+
+| Target/Recipe | Execution Scope |
+| :--- | :--- |
+| `build-up` / `just build-up` | Recompiles local service Dockerfiles and launches the compose stacks. |
+| `up` / `just up` | Launches existing Compose containers without rebuilding images. |
+| `down` / `just down` | Stops the local compose container stacks and releases networks. |
+| `ps` / `just ps` | Displays health, uptime, and mapped ports of the container cluster. |
+| `migrate` / `just migrate` | Triggers PostgreSQL schema updates via the migrate binary. |
+| `migrate-down` / `just migrate-down` | Rolls back the latest database migration states. |
+| `seeder` / `just seeder` | Populates mock entities (cards, users, roles, merchants). |
+| `generate-proto` / `just generate-proto` | Compiles `.proto` files down into Go models within `/pb`. |
+| `generate-sql` / `just generate-sql` | Recompiles sqlc repository codes from queries. |
+| `generate-swagger` / `just generate-swagger` | Regenerates OpenAPI/Swagger schema specifications. |
+| `just generate-graphql` | Invokes gqlgen mapping directives to synchronize resolver bindings. |
+| `test-auth` / `just test-auth` | Executes integration tests for the `auth` module. |
+| `just test-unit` | Executes Go standard library test routines under `pkg/`. |
+| `just test-integration` | Triggers end-to-end integration flows under `tests/`. |
+| `just test-all` | Chain-runs standard unit tests alongside integration suites. |
+| `just build` | Locally compiles all sub-services into unified `bin/` folders. |
+| `just tidy-all` | Iterates across all go modules, executing `go mod tidy` cleanups. |
+
+---
+
+## Workspace Directory Tree
 
 ```
-.
-├── proto/                          # Protobuf definitions (gRPC contracts)
-│   ├── auth.proto
-│   ├── card/
-│   ├── merchant/
-│   ├── transaction/
-│   ├── ...
-├── pb/                             # Generated Go code from proto
-├── pkg/                            # Shared Go packages (logger, kafka, etc.)
-├── shared/                         # Shared error types, utilities
-├── service/
-│   ├── apigateway/                 # GraphQL API Gateway (gqlgen)
-│   │   ├── graphql/                #   └── GraphQL schema files (.graphqls)
-│   │   ├── internal/
-│   │   │   ├── handler/            #   └── Resolver implementations
-│   │   │   ├── mapper/             #   └── gRPC ↔ GraphQL mappers
-│   │   │   ├── model/              #   └── Generated GraphQL models
-│   │   │   ├── middlewares/        #   └── Auth / logging middlewares
-│   │   │   ├── permission/         #   └── Kafka-based permission checks
-│   │   │   └── redis/              #   └── Redis cache layer
-│   │   └── gqlgen.yml              #   └── gqlgen configuration
-│   ├── auth/                       # Auth gRPC Service
-│   ├── user/                       # User gRPC Service
-│   ├── role/                       # Role gRPC Service
-│   ├── card/                       # Card gRPC Service
-│   ├── saldo/                      # Balance gRPC Service
-│   ├── transaction/                # Transaction gRPC Service
-│   ├── merchant/                   # Merchant gRPC Service
-│   ├── transfer/                   # Transfer gRPC Service
-│   ├── topup/                      # Topup gRPC Service
-│   ├── withdraw/                   # Withdraw gRPC Service
-│   ├── email/                      # Email notification service
-│   └── migrate/                    # Database migration runner
+monolith-graphql-paymentgateway-grpc/
+├── proto/                          # Protobuf contracts (12 domains)
+│   ├── auth.proto                  #   Identity tokens contracts
+│   ├── card/                       #   Virtual Card specifications
+│   ├── common/                     #   Shared protobuf data types
+│   ├── merchant/                   #   Merchant account declarations
+│   ├── merchant_document/          #   Verification files specifications
+│   ├── role/                       #   Role mapping specifications
+│   ├── saldo/                      #   Balance updates specifications
+│   ├── topup/                      #   Funding balance specifications
+│   ├── transaction/                #   General audit register specifications
+│   ├── transfer/                   #   Peer-to-peer transaction specifications
+│   ├── user/                       #   User CRUD data properties
+│   └── withdraw/                   #   Bank settlement configurations
+├── shared/                         # Consolidated workspace module
+│   ├── pb/                         #   Compiled protobuf outputs
+│   ├── domain/                     #   Internal domain models & requests
+│   ├── mapper/                     #   Bidirectional converters (Proto ↔ Go)
+│   ├── cache/                      #   Redis caching wrappers
+│   ├── observability/              #   Cache/Tracing monitoring interceptors
+│   ├── errors/                     #   Localized error templates
+│   └── errorhandler/               #   Global transaction handlers
+├── pkg/                            # Multi-project utilities module
+│   ├── adapter/                    #   External connection controllers
+│   ├── api-key/                    #   API Key generation & validation
+│   ├── auth/                       #   JWT authentication utilities
+│   ├── database/                   #   Relational DB initialization hooks
+│   ├── date/                       #   Time utilities
+│   ├── dotenv/                     #   Environment loader helper
+│   ├── email/                      #   SMTP email driver
+│   ├── hash/                       #   Bcrypt cryptography utilities
+│   ├── kafka/                      #   Kafka writer/reader configurations
+│   ├── logger/                     #   Structured Zap logs wrappers
+│   ├── method_topup/               #   Valid top-up methods definitions
+│   ├── middleware/                 #   HTTP/gRPC general middleware
+│   ├── otel/                       #   Telemetry hooks config
+│   ├── random_string/              #   String helper generators
+│   ├── randomvcc/                  #   VCC balance issuer helpers
+│   ├── redis/                      #   Redis backend connectors
+│   ├── resilience/                 #   Circuit breaker, rate limiter, load monitor
+│   ├── rupiah/                     #   Indonesian Rupiah cash mappings
+│   ├── server/                     #   gRPC bootstrap templates
+│   └── trace_unic/                 #   Observability tracing utilities
+├── service/                        # Isolated functional business domains
+│   ├── apigateway/                 #   Unified GraphQL endpoint gateway
+│   ├── auth/                       #   Identity authentication engine
+│   ├── user/                       #   User profiles administration
+│   ├── role/                       #   RBAC authorization configurations
+│   ├── merchant/                   #   Merchants registration
+│   ├── card/                       #   Debit & VCC virtual logs
+│   ├── saldo/                      #   Real-time balance records
+│   ├── topup/                      #   Funding balance processor
+│   ├── transaction/                #   Central audit ledger service
+│   ├── transfer/                   #   P2P funding transfer engine
+│   ├── withdraw/                   #   Outbound settlement handler
+│   ├── email/                      #   Asynchronous Kafka notification worker
+│   └── migrate/                    #   Incremental DB migrations runner
 ├── deployments/
-│   ├── local/                      # Docker Compose files
-│   └── kubernetes/                 # K8s manifests
-├── nginx/                          # NGINX configuration
-├── grafana/                        # Grafana dashboard JSON exports
-├── observability/                  # OTel collector, Prometheus, Loki configs
-├── seeder/                         # Database seed scripts
-├── Makefile                        # Make-based workflow
-├── justfile                        # Just-based workflow (alternative)
-└── sqlc.yaml                       # sqlc configuration
+│   ├── local/                      #   Docker compose infrastructure scripts
+│   └── kubernetes/                 #   Production K8s manifests ( deployments, HPAs, volumes)
+├── observability/                  #   Telemetry pipeline yaml profiles (Loki, OTEL, Promtail)
+├── grafana/                        #   Pre-configured dashboard templates
+├── nginx/                          #   Reverse-proxy edge rules
+├── redis/                          #   Advanced Redis configs
+└── images/                         #   Architecture diagrams & dashboard screenshots
 ```
 
 ---
 
-## Maintenance Operations
-
-### Code Generation
-| Command | Description |
-|---|---|
-| `make generate-proto` | Generate Go code from Protobuf definitions |
-| `make generate-sql` | Generate type-safe SQL helpers via sqlc |
-
-> **GraphQL codegen**: Run `go generate ./...` inside `service/apigateway/` to regenerate gqlgen models and resolvers.
-
-### Database Management
-| Command | Description |
-|---|---|
-| `make migrate` | Apply database migrations |
-| `make migrate-down` | Revert database migrations |
-| `make seeder` | Populate database with test data |
-
-### Infrastructure Control
-| Command | Description |
-|---|---|
-| `make build-up` | Build images and start local containers |
-| `make down` | Stop local development environment |
-| `make ps` | View running container status |
-
-### Kubernetes Operations
-| Command | Description |
-|---|---|
-| `make kube-start` | Initialize local Minikube cluster |
-| `make kube-up` | Deploy application to Kubernetes |
-| `make kube-down` | Remove application from Kubernetes |
-| `make kube-status` | Check Kubernetes resource status |
-
----
-
-## Deployment Options
-
-### Docker Compose
-Recommended for local development and integration testing. Orchestrates the GraphQL API Gateway, all gRPC backend services, and infrastructure components (Kafka, PostgreSQL, Redis, etc.) in a single environment.
-
-### Kubernetes
-Designed for production-grade environments:
-*   Service isolation within dedicated pods and namespaces.
-*   Horizontal Pod Autoscaling (HPA) for critical services (Transaction, Balance).
-*   StatefulSets for stateful infrastructure (Kafka, Redis, PostgreSQL).
-*   Automated database migration jobs.
-*   Centralized observability via DaemonSets for logs, metrics, and traces.
-
----
-
-## Monitoring & Dashboards
-
-The platform provides extensive Grafana dashboards for real-time monitoring:
+## Screenshots
 
 ### Database Schema (ERD)
-![Entity Relationship Diagram](./images/Payment%20Gateway.png)
 
-### Observability Dashboards
+![Payment Gateway Database Schema](./images/Payment%20Gateway.png)
 
-*   **System Performance**: Resource utilization (CPU, Memory, Network).
-*   **Auth & User Services**: Identity management and session metrics.
-*   **Transaction Flow**: Real-time payment processing and settlement status.
-*   **Balance & Financial Stats**: Account state and operational metrics.
+### System Deployments Architecture
 
-#### Node Exporter
-![Node Exporter Dashboard](./images/node-exporter.png)
+#### Local Development Deployment Architecture (Docker Compose)
 
-#### Email Service
-![Email Service Dashboard](./images/email-service.png)
+![Docker Compose Architecture](./images/archictecture_docker_payment_gateway.png)
 
-#### Authentication Service
-![Auth Service Dashboard](./images/auth-service.png)
+#### Production Ready Clustering Architecture (Kubernetes)
 
-#### User Service
-![User Service Dashboard](./images/user-service.png)
+![Kubernetes Production Architecture](./images/archictecture_kubernetes_payment_gateway.png)
 
-#### Transaction Service
-![Transaction Service Dashboard](./images/transaction-service.png)
+### API Documentation Gateway
 
-#### Transfer Service
-![Transfer Service Dashboard](./images/transfer-service.png)
+#### Unified API Gateway Documentation (Swagger)
 
-#### Withdrawal Service
-![Withdrawal Service Dashboard](./images/withdraw-service.png)
+![Swagger API Documentation](./images/swagger.png)
+
+### Observability Metrics & Dashboards
+
+The platform features tailored Grafana Dashboards displaying sub-second metrics, transaction rates, memory profiles, cache states, and database logs for every service:
+
+````carousel
+![Auth Service Metrics](./images/auth-service.png)
+<!-- slide -->
+![Card Service Metrics](./images/card-service.png)
+<!-- slide -->
+![Email Service Metrics](./images/email-service.png)
+<!-- slide -->
+![Merchant Service Metrics](./images/merchant-service.png)
+<!-- slide -->
+![Role Service Metrics](./images/role-service.png)
+<!-- slide -->
+![Saldo Service Metrics](./images/saldo-service.png)
+<!-- slide -->
+![Topup Service Metrics](./images/topup-service.png)
+<!-- slide -->
+![Transaction Service Metrics](./images/transaction-service.png)
+<!-- slide -->
+![Transfer Service Metrics](./images/transfer-service.png)
+<!-- slide -->
+![User Service Metrics](./images/user-service.png)
+<!-- slide -->
+![Withdraw Service Metrics](./images/withdraw-service.png)
+<!-- slide -->
+![Node Exporter System Metrics](./images/node-exporter.png)
+````
 
 ---
 
 ## License
 
-This project is licensed under the terms of the [LICENSE](./LICENSE) file.
+This project is open-sourced under the MIT License for educational and development purposes.
+
+---
+
+<p align="center">
+  Built with Go, gRPC, Apache Kafka, and a passion for high-performance modular monoliths.
+</p>
