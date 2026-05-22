@@ -12,11 +12,17 @@ import (
 type CacheApiGateway interface {
 	MerchantCache
 	RoleCache
+	GetStore() *sharedcachehelpers.CacheStore
 }
 
 type mencacheApiGateay struct {
 	MerchantCache
 	RoleCache
+	store *sharedcachehelpers.CacheStore
+}
+
+func (m *mencacheApiGateay) GetStore() *sharedcachehelpers.CacheStore {
+	return m.store
 }
 
 type Deps struct {
@@ -35,5 +41,6 @@ func NewCacheApiGateway(deps *Deps) CacheApiGateway {
 	return &mencacheApiGateay{
 		MerchantCache: NewMerchantCache(store),
 		RoleCache:     NewRoleCache(store),
+		store:         store,
 	}
 }

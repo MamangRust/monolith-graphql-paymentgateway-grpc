@@ -7,246 +7,418 @@ package graph
 import (
 	"context"
 
-	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/merchant_document"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
-	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CreateMerchantDocument is the resolver for the createMerchantDocument field.
 func (r *mutationResolver) CreateMerchantDocument(ctx context.Context, input model.CreateMerchantDocumentInput) (*model.APIResponseMerchantDocument, error) {
-	request := &requests.CreateMerchantDocumentRequest{
-		MerchantID:   int(input.MerchantID),
-		DocumentType: input.DocumentType,
-		DocumentUrl:  input.DocumentURL,
-	}
+	return ResolverHandle(r.ResolverHandle, "CreateMerchantDocument", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocument, error) {
+		request := &requests.CreateMerchantDocumentRequest{
+			MerchantID:   int(input.MerchantID),
+			DocumentType: input.DocumentType,
+			DocumentUrl:  input.DocumentURL,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	req := &pb.CreateMerchantDocumentRequest{
-		MerchantId:   int32(input.MerchantID),
-		DocumentType: input.DocumentType,
-		DocumentUrl:  input.DocumentURL,
-	}
+		req := &pb.CreateMerchantDocumentRequest{
+			MerchantId:   int32(input.MerchantID),
+			DocumentType: input.DocumentType,
+			DocumentUrl:  input.DocumentURL,
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Create(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Create(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "CreateMerchantDocument")
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res), nil
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res)
+		return so, nil
+	})
 }
 
 // UpdateMerchantDocument is the resolver for the updateMerchantDocument field.
 func (r *mutationResolver) UpdateMerchantDocument(ctx context.Context, input model.UpdateMerchantDocumentInput) (*model.APIResponseMerchantDocument, error) {
-	docId := int(input.DocumentID)
+	return ResolverHandle(r.ResolverHandle, "UpdateMerchantDocument", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocument, error) {
+		docId := int(input.DocumentID)
 
-	if docId == 0 {
-		return nil, graphqlerror.ErrGraphqlMerchantInvalidID
-	}
+		if docId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: document ID cannot be zero")
+		}
 
-	request := &requests.UpdateMerchantDocumentRequest{
-		DocumentID:   &docId,
-		MerchantID:   int(input.MerchantID),
-		DocumentType: input.DocumentType,
-		DocumentUrl:  input.DocumentURL,
-		Note:         *input.Note,
-		Status:       *input.Status,
-	}
+		request := &requests.UpdateMerchantDocumentRequest{
+			DocumentID:   &docId,
+			MerchantID:   int(input.MerchantID),
+			DocumentType: input.DocumentType,
+			DocumentUrl:  input.DocumentURL,
+			Note:         *input.Note,
+			Status:       *input.Status,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	req := &pb.UpdateMerchantDocumentRequest{
-		DocumentId:   int32(input.DocumentID),
-		MerchantId:   int32(input.MerchantID),
-		DocumentType: input.DocumentType,
-		DocumentUrl:  input.DocumentURL,
-		Note:         *input.Note,
-		Status:       *input.Status,
-	}
+		req := &pb.UpdateMerchantDocumentRequest{
+			DocumentId:   int32(input.DocumentID),
+			MerchantId:   int32(input.MerchantID),
+			DocumentType: input.DocumentType,
+			DocumentUrl:  input.DocumentURL,
+			Note:         *input.Note,
+			Status:       *input.Status,
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Update(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Update(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "UpdateMerchantDocument")
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res), nil
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res)
+
+		r.MerchantDocumentGraphql.Cache.DeleteCachedMerchantDocument(ctx, docId)
+
+		return so, nil
+	})
 }
 
 // UpdateMerchantDocumentStatus is the resolver for the updateMerchantDocumentStatus field.
 func (r *mutationResolver) UpdateMerchantDocumentStatus(ctx context.Context, input model.UpdateMerchantDocumentStatusInput) (*model.APIResponseMerchantDocument, error) {
-	docId := int(input.DocumentID)
+	return ResolverHandle(r.ResolverHandle, "UpdateMerchantDocumentStatus", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocument, error) {
+		docId := int(input.DocumentID)
 
-	if docId == 0 {
-		return nil, graphqlerror.ErrGraphqlMerchantInvalidID
-	}
+		if docId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: document ID cannot be zero")
+		}
 
-	request := &requests.UpdateMerchantDocumentStatusRequest{
-		DocumentID: &docId,
-		MerchantID: int(input.MerchantID),
-		Status:     *input.Status,
-		Note:       *input.Note,
-	}
+		request := &requests.UpdateMerchantDocumentStatusRequest{
+			DocumentID: &docId,
+			MerchantID: int(input.MerchantID),
+			Status:     *input.Status,
+			Note:       *input.Note,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	req := &pb.UpdateMerchantDocumentStatusRequest{
-		DocumentId: int32(input.DocumentID),
-		MerchantId: int32(input.MerchantID),
-		Note:       *input.Note,
-		Status:     *input.Status,
-	}
+		req := &pb.UpdateMerchantDocumentStatusRequest{
+			DocumentId: int32(input.DocumentID),
+			MerchantId: int32(input.MerchantID),
+			Note:       *input.Note,
+			Status:     *input.Status,
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.UpdateStatus(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.UpdateStatus(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "UpdateMerchantDocumentStatus")
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res), nil
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res)
+
+		r.MerchantDocumentGraphql.Cache.DeleteCachedMerchantDocument(ctx, docId)
+
+		return so, nil
+	})
 }
 
-// TrashedMerchantDocument
+// TrashedMerchantDocument is the resolver for the trashedMerchantDocument field.
 func (r *mutationResolver) TrashedMerchantDocument(ctx context.Context, input model.TrashedMerchantDocumentInput) (*model.APIResponseMerchantDocumentDeleteAt, error) {
-	req := &pb.FindMerchantDocumentByIdRequest{
-		DocumentId: int32(input.DocumentID),
-	}
+	return ResolverHandle(r.ResolverHandle, "TrashedMerchantDocument", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocumentDeleteAt, error) {
+		docId := int(input.DocumentID)
+		if docId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: document ID cannot be zero")
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Trashed(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		req := &pb.FindMerchantDocumentByIdRequest{
+			DocumentId: int32(docId),
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocumentDeleteAt(res), nil
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Trashed(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "TrashedMerchantDocument")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocumentDeleteAt(res)
+
+		r.MerchantDocumentGraphql.Cache.DeleteCachedMerchantDocument(ctx, docId)
+
+		return so, nil
+	})
 }
 
-// RestoreMerchantDocument
+// RestoreMerchantDocument is the resolver for the restoreMerchantDocument field.
 func (r *mutationResolver) RestoreMerchantDocument(ctx context.Context, input model.RestoreMerchantDocumentInput) (*model.APIResponseMerchantDocumentDeleteAt, error) {
-	req := &pb.FindMerchantDocumentByIdRequest{
-		DocumentId: int32(input.DocumentID),
-	}
+	return ResolverHandle(r.ResolverHandle, "RestoreMerchantDocument", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocumentDeleteAt, error) {
+		docId := int(input.DocumentID)
+		if docId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: document ID cannot be zero")
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Restore(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		req := &pb.FindMerchantDocumentByIdRequest{
+			DocumentId: int32(docId),
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocumentDeleteAt(res), nil
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.Restore(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreMerchantDocument")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocumentDeleteAt(res)
+
+		r.MerchantDocumentGraphql.Cache.DeleteCachedMerchantDocument(ctx, docId)
+
+		return so, nil
+	})
 }
 
-// DeleteMerchantDocumentPermanent
+// DeleteMerchantDocumentPermanent is the resolver for the deleteMerchantDocumentPermanent field.
 func (r *mutationResolver) DeleteMerchantDocumentPermanent(ctx context.Context, input model.DeleteMerchantDocumentPermanentInput) (*model.APIResponseMerchantDocumentDelete, error) {
-	req := &pb.FindMerchantDocumentByIdRequest{
-		DocumentId: int32(input.DocumentID),
-	}
+	return ResolverHandle(r.ResolverHandle, "DeleteMerchantDocumentPermanent", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocumentDelete, error) {
+		docId := int(input.DocumentID)
+		if docId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: document ID cannot be zero")
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.DeletePermanent(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		req := &pb.FindMerchantDocumentByIdRequest{
+			DocumentId: int32(docId),
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseDelete(res), nil
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.DeletePermanent(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteMerchantDocumentPermanent")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseDelete(res)
+
+		r.MerchantDocumentGraphql.Cache.DeleteCachedMerchantDocument(ctx, docId)
+
+		return so, nil
+	})
 }
 
-// RestoreAllMerchantDocuments
+// RestoreAllMerchantDocuments is the resolver for the restoreAllMerchantDocuments field.
 func (r *mutationResolver) RestoreAllMerchantDocuments(ctx context.Context) (*model.APIResponseMerchantDocumentAll, error) {
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.RestoreAll(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+	return ResolverHandle(r.ResolverHandle, "RestoreAllMerchantDocuments", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocumentAll, error) {
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.RestoreAll(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreAllMerchantDocuments")
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseAll(res), nil
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseAll(res)
+		return so, nil
+	})
 }
 
-// DeleteAllMerchantDocumentsPermanent
+// DeleteAllMerchantDocumentsPermanent is the resolver for the deleteAllMerchantDocumentsPermanent field.
 func (r *mutationResolver) DeleteAllMerchantDocumentsPermanent(ctx context.Context) (*model.APIResponseMerchantDocumentAll, error) {
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.DeleteAllPermanent(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+	return ResolverHandle(r.ResolverHandle, "DeleteAllMerchantDocumentsPermanent", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocumentAll, error) {
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentCommandClient.DeleteAllPermanent(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteAllMerchantDocumentsPermanent")
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseAll(res), nil
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseAll(res)
+		return so, nil
+	})
 }
 
-// FindAllMerchantDocuments
+// FindAllMerchantDocuments is the resolver for the findAllMerchantDocuments field.
 func (r *queryResolver) FindAllMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocument, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindAllMerchantDocuments", ctx, func(ctx context.Context) (*model.APIResponsePaginationMerchantDocument, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	req := &pb.FindAllMerchantDocumentsRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindAll(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		normalizedInput := model.FindAllMerchantDocumentsInput{
+			Page:     &page,
+			PageSize: &pageSize,
+			Search:   &search,
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponsePaginationMerchantDocument(res), nil
+		cachedData, found := r.MerchantDocumentGraphql.Cache.GetCachedMerchantDocuments(ctx, normalizedInput)
+		if found {
+			return cachedData, nil
+		}
+
+		req := &pb.FindAllMerchantDocumentsRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
+
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindAll(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllMerchantDocuments")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponsePaginationMerchantDocument(res)
+
+		r.MerchantDocumentGraphql.Cache.SetCachedMerchantDocuments(ctx, normalizedInput, so)
+
+		return so, nil
+	})
 }
 
-// FindAllActiveMerchantDocuments
+// FindAllActiveMerchantDocuments is the resolver for the findAllActiveMerchantDocuments field.
 func (r *queryResolver) FindAllActiveMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocumentAt, error) {
-	req := &pb.FindAllMerchantDocumentsRequest{
-		Page:     int32(*input.Page),
-		PageSize: int32(*input.PageSize),
-		Search:   *input.Search,
-	}
+	return ResolverHandle(r.ResolverHandle, "FindAllActiveMerchantDocuments", ctx, func(ctx context.Context) (*model.APIResponsePaginationMerchantDocumentAt, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindAllActive(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponsePaginationMerchantDocumentDeleteAt(res), nil
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
+
+		normalizedInput := model.FindAllMerchantDocumentsInput{
+			Page:     &page,
+			PageSize: &pageSize,
+			Search:   &search,
+		}
+
+		cachedData, found := r.MerchantDocumentGraphql.Cache.GetCachedMerchantDocumentActive(ctx, normalizedInput)
+		if found {
+			return cachedData, nil
+		}
+
+		req := &pb.FindAllMerchantDocumentsRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
+
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindAllActive(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllActiveMerchantDocuments")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponsePaginationMerchantDocumentDeleteAt(res)
+
+		r.MerchantDocumentGraphql.Cache.SetCachedMerchantDocumentActive(ctx, normalizedInput, so)
+
+		return so, nil
+	})
 }
 
-// FindAllTrashedMerchantDocuments
+// FindAllTrashedMerchantDocuments is the resolver for the findAllTrashedMerchantDocuments field.
 func (r *queryResolver) FindAllTrashedMerchantDocuments(ctx context.Context, input model.FindAllMerchantDocumentsInput) (*model.APIResponsePaginationMerchantDocumentAt, error) {
-	req := &pb.FindAllMerchantDocumentsRequest{
-		Page:     int32(*input.Page),
-		PageSize: int32(*input.PageSize),
-		Search:   *input.Search,
-	}
+	return ResolverHandle(r.ResolverHandle, "FindAllTrashedMerchantDocuments", ctx, func(ctx context.Context) (*model.APIResponsePaginationMerchantDocumentAt, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindAllTrashed(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponsePaginationMerchantDocumentDeleteAt(res), nil
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
+
+		normalizedInput := model.FindAllMerchantDocumentsInput{
+			Page:     &page,
+			PageSize: &pageSize,
+			Search:   &search,
+		}
+
+		cachedData, found := r.MerchantDocumentGraphql.Cache.GetCachedMerchantDocumentTrashed(ctx, normalizedInput)
+		if found {
+			return cachedData, nil
+		}
+
+		req := &pb.FindAllMerchantDocumentsRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
+
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindAllTrashed(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllTrashedMerchantDocuments")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponsePaginationMerchantDocumentDeleteAt(res)
+
+		r.MerchantDocumentGraphql.Cache.SetCachedMerchantDocumentTrashed(ctx, normalizedInput, so)
+
+		return so, nil
+	})
 }
 
-// FindMerchantDocumentByID
+// FindMerchantDocumentByID is the resolver for the findMerchantDocumentByID field.
 func (r *queryResolver) FindMerchantDocumentByID(ctx context.Context, input model.FindMerchantDocumentByIDInput) (*model.APIResponseMerchantDocument, error) {
-	req := &pb.FindMerchantDocumentByIdRequest{
-		DocumentId: int32(input.DocumentID),
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMerchantDocumentByID", ctx, func(ctx context.Context) (*model.APIResponseMerchantDocument, error) {
+		docId := int(input.DocumentID)
+		if docId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: document ID cannot be zero")
+		}
 
-	res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindById(ctx, req)
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		cachedData, found := r.MerchantDocumentGraphql.Cache.GetCachedMerchantDocumentById(ctx, docId)
+		if found {
+			return cachedData, nil
+		}
 
-	return r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res), nil
+		req := &pb.FindMerchantDocumentByIdRequest{
+			DocumentId: int32(docId),
+		}
+
+		res, err := r.MerchantDocumentGraphql.MerchantClient.MerchantDocumentQueryClient.FindById(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMerchantDocumentByID")
+		}
+
+		so := r.MerchantDocumentGraphql.Mapping.ToGraphqlResponseMerchantDocument(res)
+
+		r.MerchantDocumentGraphql.Cache.SetCachedMerchantDocumentById(ctx, docId, so)
+
+		return so, nil
+	})
 }

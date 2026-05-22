@@ -131,9 +131,14 @@ build:
         dir=$(dirname $mod); \
         service=$(basename $dir); \
         echo "🔨 Building $service..."; \
-        (cd $dir && go build -o ../../bin/$service ./cmd/main.go) || exit 1; \
+        if [ -f "$dir/cmd/main.go" ]; then \
+            (cd $dir && go build -o ../../bin/$service ./cmd/main.go) || exit 1; \
+        else \
+            (cd $dir && go build -o ../../bin/$service ./main.go) || exit 1; \
+        fi; \
     done
     @echo "✅ All services built successfully in bin/ folder."
+
 
 # Run go mod tidy for all services
 tidy-all:

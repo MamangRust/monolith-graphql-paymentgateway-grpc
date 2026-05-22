@@ -9,884 +9,1230 @@ import (
 	"fmt"
 	"time"
 
-	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card"
-	pbstats "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card/stats"
+	cardstatpb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card/stats"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
-	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // CreateCard is the resolver for the createCard field.
 func (r *mutationResolver) CreateCard(ctx context.Context, input model.CreateCardInput) (*model.APIResponseCard, error) {
-	expireDate, err := time.Parse("2006-01-02", input.ExpireDate)
-	if err != nil {
-		return nil, fmt.Errorf("invalid date format for ExpireDate: %v (expected YYYY-MM-DD)", err)
-	}
+	return ResolverHandle(r.ResolverHandle, "CreateCard", ctx, func(ctx context.Context) (*model.APIResponseCard, error) {
+		expireDate, err := time.Parse("2006-01-02", input.ExpireDate)
+		if err != nil {
+			return nil, errors.NewBadRequestError(
+				"invalid expire_date format, expected YYYY-MM-DD",
+			)
+		}
 
-	request := &requests.CreateCardRequest{
-		UserID:       int(input.UserID),
-		CardType:     input.CardType,
-		ExpireDate:   expireDate,
-		CVV:          input.Cvv,
-		CardProvider: input.CardProvider,
-	}
+		request := requests.CreateCardRequest{
+			UserID:       int(input.UserID),
+			CardType:     input.CardType,
+			ExpireDate:   expireDate,
+			CVV:          input.Cvv,
+			CardProvider: input.CardProvider,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
+		req := &pb.CreateCardRequest{
+			UserId:       int32(request.UserID),
+			CardType:     request.CardType,
+			ExpireDate:   timestamppb.New(request.ExpireDate),
+			Cvv:          request.CVV,
+			CardProvider: request.CardProvider,
+		}
 
-	req := &pb.CreateCardRequest{
-		UserId:       int32(input.UserID),
-		CardType:     input.CardType,
-		ExpireDate:   timestamppb.New(expireDate),
-		Cvv:          input.Cvv,
-		CardProvider: input.CardProvider,
-	}
+		res, err := r.CardGraphql.CardClient.CardCommandClient.CreateCard(ctx, req)
 
-	res, err := r.CardGraphql.CardClient.CardCommandClient.CreateCard(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "CreateCard")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // UpdateCard is the resolver for the updateCard field.
 func (r *mutationResolver) UpdateCard(ctx context.Context, input model.UpdateCardInput) (*model.APIResponseCard, error) {
-	expireDate, err := time.Parse("2006-01-02", input.ExpireDate)
-	if err != nil {
-		return nil, fmt.Errorf("invalid date format for ExpireDate: %v (expected YYYY-MM-DD)", err)
-	}
+	return ResolverHandle(r.ResolverHandle, "UpdateCard", ctx, func(ctx context.Context) (*model.APIResponseCard, error) {
+		id := int(input.CardID)
 
-	request := &requests.UpdateCardRequest{
-		CardID:       int(input.CardID),
-		UserID:       int(input.UserID),
-		CardType:     input.CardType,
-		ExpireDate:   expireDate,
-		CVV:          input.Cvv,
-		CardProvider: input.CardProvider,
-	}
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: card ID cannot be zero")
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		expireDate, err := time.Parse("2006-01-02", input.ExpireDate)
+		if err != nil {
+			return nil, fmt.Errorf("invalid date format for ExpireDate: %v (expected YYYY-MM-DD)", err)
+		}
 
-	req := &pb.UpdateCardRequest{
-		CardId:       int32(input.CardID),
-		UserId:       int32(input.UserID),
-		CardType:     input.CardType,
-		ExpireDate:   timestamppb.New(expireDate),
-		Cvv:          input.Cvv,
-		CardProvider: input.CardProvider,
-	}
+		request := requests.UpdateCardRequest{
+			CardID:       id,
+			UserID:       int(input.UserID),
+			CardType:     input.CardType,
+			ExpireDate:   expireDate,
+			CVV:          input.Cvv,
+			CardProvider: input.CardProvider,
+		}
 
-	res, err := r.CardGraphql.CardClient.CardCommandClient.UpdateCard(ctx, req)
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		req := &pb.UpdateCardRequest{
+			UserId:       int32(input.UserID),
+			CardType:     input.CardType,
+			ExpireDate:   timestamppb.New(expireDate),
+			Cvv:          input.Cvv,
+			CardProvider: input.CardProvider}
+		res, err := r.CardGraphql.CardClient.CardCommandClient.UpdateCard(ctx, req)
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "UpdateCard")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
+
+		r.CardGraphql.Cache.DeleteByIdCache(ctx, request.CardID)
+
+		return so, nil
+	})
 }
 
 // TrashedCard is the resolver for the trashedCard field.
 func (r *mutationResolver) TrashedCard(ctx context.Context, input model.FindByIDCardInput) (*model.APIResponseCardDeleteAt, error) {
-	id := int32(input.CardID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidCardID
-	}
+	return ResolverHandle(r.ResolverHandle, "TrashedCard", ctx, func(ctx context.Context) (*model.APIResponseCardDeleteAt, error) {
+		id := int32(input.CardID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: card ID cannot be zero")
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardCommandClient.TrashedCard(ctx, &pb.FindByIdCardRequest{CardId: id})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		res, errResp := r.CardGraphql.CardClient.CardCommandClient.TrashedCard(ctx, &pb.FindByIdCardRequest{CardId: id})
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "TrashedCard")
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseCardDeleteAt(res)
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCardDeleteAt(res)
 
-	return so, nil
+		r.CardGraphql.Cache.DeleteByIdCache(ctx, int(id))
+
+		return so, nil
+	})
 }
 
 // RestoreCard is the resolver for the restoreCard field.
 func (r *mutationResolver) RestoreCard(ctx context.Context, input model.FindByIDCardInput) (*model.APIResponseCardDeleteAt, error) {
-	id := int32(input.CardID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidCardID
-	}
+	return ResolverHandle(r.ResolverHandle, "RestoreCard", ctx, func(ctx context.Context) (*model.APIResponseCardDeleteAt, error) {
+		id := int32(input.CardID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: card ID cannot be zero")
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardCommandClient.RestoreCard(ctx, &pb.FindByIdCardRequest{CardId: id})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		res, errResp := r.CardGraphql.CardClient.CardCommandClient.RestoreCard(ctx, &pb.FindByIdCardRequest{CardId: id})
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "RestoreCard")
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseCardDeleteAt(res)
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCardDeleteAt(res)
 
-	return so, nil
+		r.CardGraphql.Cache.DeleteByIdCache(ctx, int(id))
+
+		return so, nil
+	})
 }
 
 // DeleteCardPermanent is the resolver for the deleteCardPermanent field.
 func (r *mutationResolver) DeleteCardPermanent(ctx context.Context, input model.FindByIDCardInput) (*model.APIResponseCardDelete, error) {
-	id := int32(input.CardID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidCardID
-	}
+	return ResolverHandle(r.ResolverHandle, "DeleteCardPermanent", ctx, func(ctx context.Context) (*model.APIResponseCardDelete, error) {
+		id := int32(input.CardID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: card ID cannot be zero")
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardCommandClient.DeleteCardPermanent(ctx, &pb.FindByIdCardRequest{CardId: id})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		res, errResp := r.CardGraphql.CardClient.CardCommandClient.DeleteCardPermanent(ctx, &pb.FindByIdCardRequest{CardId: id})
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "DeleteCardPermanent")
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseDelete(res)
+		so := r.CardGraphql.Mapping.ToGraphqlResponseDelete(res)
 
-	return so, nil
+		r.CardGraphql.Cache.DeleteByIdCache(ctx, int(id))
+
+		return so, nil
+	})
 }
 
 // RestoreAllCard is the resolver for the restoreAllCard field.
 func (r *mutationResolver) RestoreAllCard(ctx context.Context) (*model.APIResponseCardAll, error) {
-	res, errResp := r.CardGraphql.CardClient.CardCommandClient.DeleteAllCardPermanent(ctx, &emptypb.Empty{})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+	return ResolverHandle(r.ResolverHandle, "RestoreAllCard", ctx, func(ctx context.Context) (*model.APIResponseCardAll, error) {
+		res, errResp := r.CardGraphql.CardClient.CardCommandClient.RestoreAllCard(ctx, &emptypb.Empty{})
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "RestoreAllCard")
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseAll(res)
+		so := r.CardGraphql.Mapping.ToGraphqlResponseAll(res)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // DeleteAllCardPermanent is the resolver for the deleteAllCardPermanent field.
 func (r *mutationResolver) DeleteAllCardPermanent(ctx context.Context) (*model.APIResponseCardAll, error) {
-	res, errResp := r.CardGraphql.CardClient.CardCommandClient.DeleteAllCardPermanent(ctx, &emptypb.Empty{})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+	return ResolverHandle(r.ResolverHandle, "DeleteAllCardPermanent", ctx, func(ctx context.Context) (*model.APIResponseCardAll, error) {
+		res, errResp := r.CardGraphql.CardClient.CardCommandClient.DeleteAllCardPermanent(ctx, &emptypb.Empty{})
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "DeleteAllCardPermanent")
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponseAll(res)
+		so := r.CardGraphql.Mapping.ToGraphqlResponseAll(res)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindAllCard is the resolver for the findAllCard field.
 func (r *queryResolver) FindAllCard(ctx context.Context, input model.FindAllCardInput) (*model.APIResponsePaginationCard, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindAllCard", ctx, func(ctx context.Context) (*model.APIResponsePaginationCard, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	req := &pb.FindAllCardRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, err := r.CardGraphql.CardClient.CardQueryClient.FindAllCard(ctx, req)
+		req := &pb.FindAllCardRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		cachedData, found := r.CardGraphql.Cache.GetFindAllCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponsePaginationCard(res)
+		res, err := r.CardGraphql.CardClient.CardQueryClient.FindAllCard(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllCard")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlResponsePaginationCard(res)
+
+		r.CardGraphql.Cache.SetFindAllCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindByIDCard is the resolver for the findByIdCard field.
 func (r *queryResolver) FindByIDCard(ctx context.Context, input model.FindByIDCardInput) (*model.APIResponseCard, error) {
-	id := int32(input.CardID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidCardID
-	}
+	return ResolverHandle(r.ResolverHandle, "FindByIDCard", ctx, func(ctx context.Context) (*model.APIResponseCard, error) {
+		id := int32(input.CardID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: card ID cannot be zero")
+		}
 
-	card, err := r.CardGraphql.CardClient.CardQueryClient.FindByIdCard(ctx, &pb.FindByIdCardRequest{
-		CardId: id,
+		cachedData, found := r.CardGraphql.Cache.GetByIdCache(ctx, int(id))
+		if found {
+			return cachedData, nil
+		}
+
+		card, err := r.CardGraphql.CardClient.CardQueryClient.FindByIdCard(ctx, &pb.FindByIdCardRequest{
+			CardId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByIDCard")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCard(card)
+
+		r.CardGraphql.Cache.SetByIdCache(ctx, int(id), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlResponseCard(card)
-
-	return so, nil
 }
 
 // FindByUserIDCard is the resolver for the findByUserIdCard field.
 func (r *queryResolver) FindByUserIDCard(ctx context.Context, input model.FindByUserIDCardInput) (*model.APIResponseCard, error) {
-	id := int32(input.UserID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidUserID
-	}
+	return ResolverHandle(r.ResolverHandle, "FindByUserIDCard", ctx, func(ctx context.Context) (*model.APIResponseCard, error) {
+		id := int32(input.UserID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: card user ID cannot be zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardQueryClient.FindByUserIdCard(ctx, &pb.FindByUserIdCardRequest{
-		UserId: id,
+		cachedData, found := r.CardGraphql.Cache.GetByUserIDCache(ctx, int(id))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardQueryClient.FindByUserIdCard(ctx, &pb.FindByUserIdCardRequest{
+			UserId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByUserIDCard")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
+
+		r.CardGraphql.Cache.SetByUserIDCache(ctx, int(id), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
-
-	return so, nil
 }
 
 // FindByActiveCard is the resolver for the findByActiveCard field.
 func (r *queryResolver) FindByActiveCard(ctx context.Context, input model.FindAllCardInput) (*model.APIResponsePaginationCardDeleteAt, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindByActiveCard", ctx, func(ctx context.Context) (*model.APIResponsePaginationCardDeleteAt, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	req := &pb.FindAllCardRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, err := r.CardGraphql.CardClient.CardQueryClient.FindByActiveCard(ctx, req)
+		req := &pb.FindAllCardRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		cachedData, found := r.CardGraphql.Cache.GetByActiveCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponsePaginationCardDeleteAt(res)
+		res, err := r.CardGraphql.CardClient.CardQueryClient.FindByActiveCard(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByActiveCard")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlResponsePaginationCardDeleteAt(res)
+
+		r.CardGraphql.Cache.SetByActiveCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindByTrashedCard is the resolver for the findByTrashedCard field.
 func (r *queryResolver) FindByTrashedCard(ctx context.Context, input model.FindAllCardInput) (*model.APIResponsePaginationCardDeleteAt, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindByTrashedCard", ctx, func(ctx context.Context) (*model.APIResponsePaginationCardDeleteAt, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	req := &pb.FindAllCardRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, err := r.CardGraphql.CardClient.CardQueryClient.FindByTrashedCard(ctx, req)
+		req := &pb.FindAllCardRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		cachedData, found := r.CardGraphql.Cache.GetByTrashedCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlResponsePaginationCardDeleteAt(res)
+		res, err := r.CardGraphql.CardClient.CardQueryClient.FindByTrashedCard(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByTrashedCard")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlResponsePaginationCardDeleteAt(res)
+
+		r.CardGraphql.Cache.SetByTrashedCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindByCardNumber is the resolver for the findByCardNumber field.
 func (r *queryResolver) FindByCardNumber(ctx context.Context, input model.FindByCardNumberInput) (*model.APIResponseCard, error) {
-	panic(fmt.Errorf("not implemented: FindByCardNumber - findByCardNumber"))
+	return ResolverHandle(r.ResolverHandle, "FindByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseCard, error) {
+		cardNumber := input.CardNumber
+
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
+
+		res, err := r.CardGraphql.CardClient.CardQueryClient.FindByCardNumber(ctx, &pb.FindByCardNumberRequest{
+			CardNumber: cardNumber,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByCardNumber")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlResponseCard(res)
+		return so, nil
+	})
 }
 
 // DashboardCard is the resolver for the dashboardCard field.
 func (r *queryResolver) DashboardCard(ctx context.Context) (*model.APIResponseDashboardCard, error) {
-	dashboardCard, err := r.CardGraphql.CardClient.CardDashboardClient.DashboardCard(ctx, &emptypb.Empty{})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+	return ResolverHandle(r.ResolverHandle, "DashboardCard", ctx, func(ctx context.Context) (*model.APIResponseDashboardCard, error) {
+		cachedData, found := r.CardGraphql.Cache.GetDashboardCardCache(ctx)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlDashboardCard(dashboardCard)
+		dashboardCard, err := r.CardGraphql.CardClient.CardDashboardClient.DashboardCard(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DashboardCard")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlDashboardCard(dashboardCard)
+
+		r.CardGraphql.Cache.SetDashboardCardCache(ctx, so)
+
+		return so, nil
+	})
 }
 
 // DashboardCardNumber is the resolver for the dashboardCardNumber field.
 func (r *queryResolver) DashboardCardNumber(ctx context.Context, input model.FindByCardNumberInput) (*model.APIResponseDashboardCardNumber, error) {
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "DashboardCardNumber", ctx, func(ctx context.Context) (*model.APIResponseDashboardCardNumber, error) {
+		cardNumber := input.CardNumber
 
-	if cardNumber == "" {
-		return nil, fmt.Errorf("card number cannot be empty")
-	}
+		cachedData, found := r.CardGraphql.Cache.GetDashboardCardCardNumberCache(ctx, cardNumber)
+		if found {
+			return cachedData, nil
+		}
 
-	dashboardCard, err := r.CardGraphql.CardClient.CardDashboardClient.DashboardCardNumber(ctx, &pb.FindByCardNumberRequest{
-		CardNumber: cardNumber,
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("card number cannot be empty")
+		}
+
+		dashboardCard, err := r.CardGraphql.CardClient.CardDashboardClient.DashboardCardNumber(ctx, &pb.FindByCardNumberRequest{
+			CardNumber: cardNumber,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DashboardCardNumber")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlDashboardCardCardNumber(dashboardCard)
+
+		r.CardGraphql.Cache.SetDashboardCardCardNumberCache(ctx, cardNumber, so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlDashboardCardCardNumber(dashboardCard)
-
-	return so, nil
 }
 
 // FindMonthlyBalance is the resolver for the findMonthlyBalance field.
 func (r *queryResolver) FindMonthlyBalance(ctx context.Context, input model.FindYearInput) (*model.APIResponseMonthlyBalance, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyBalance", ctx, func(ctx context.Context) (*model.APIResponseMonthlyBalance, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsBalanceClient.FindMonthlyBalance(ctx, &pbstats.FindYearBalance{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyBalanceCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsBalanceClient.FindMonthlyBalance(ctx, &cardstatpb.FindYearBalance{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyBalance")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyBalances(res)
+
+		r.CardGraphql.Cache.SetMonthlyBalanceCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyBalances(res)
-
-	return so, nil
 }
 
 // FindYearlyBalance is the resolver for the findYearlyBalance field.
 func (r *queryResolver) FindYearlyBalance(ctx context.Context, input model.FindYearInput) (*model.APIResponseYearlyBalance, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindYearlyBalance", ctx, func(ctx context.Context) (*model.APIResponseYearlyBalance, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsBalanceClient.FindYearlyBalance(ctx, &pbstats.FindYearBalance{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetYearlyBalanceCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsBalanceClient.FindYearlyBalance(ctx, &cardstatpb.FindYearBalance{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyBalance")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyBalances(res)
+
+		r.CardGraphql.Cache.SetYearlyBalanceCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyBalances(res)
-
-	return so, nil
 }
 
 // FindMonthlyTopupAmount is the resolver for the findMonthlyTopupAmount field.
 func (r *queryResolver) FindMonthlyTopupAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupAmount", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindMonthlyTopupAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTopupCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindMonthlyTopupAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+		r.CardGraphql.Cache.SetMonthlyTopupCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
-
-	return so, nil
 }
 
 // FindYearlyTopupAmount is the resolver for the findYearlyTopupAmount field.
 func (r *queryResolver) FindYearlyTopupAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupAmount", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindYearlyTopupAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTopupCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindYearlyTopupAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTopupCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
-
-	return so, nil
 }
 
 // FindMonthlyWithdrawAmount is the resolver for the findMonthlyWithdrawAmount field.
 func (r *queryResolver) FindMonthlyWithdrawAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyWithdrawAmount", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindMonthlyWithdrawAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyWithdrawCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindMonthlyWithdrawAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyWithdrawAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyWithdrawCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
-
-	return so, nil
 }
 
 // FindYearlyWithdrawAmount is the resolver for the findYearlyWithdrawAmount field.
 func (r *queryResolver) FindYearlyWithdrawAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindYearlyWithdrawAmount", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindYearlyWithdrawAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetYearlyWithdrawCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindYearlyWithdrawAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyWithdrawAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyWithdrawCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
-
-	return so, nil
 }
 
 // FindMonthlyTransactionAmount is the resolver for the findMonthlyTransactionAmount field.
 func (r *queryResolver) FindMonthlyTransactionAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransactionAmount", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindMonthlyTransactionAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTransactionCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindMonthlyTransactionAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransactionAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTransactionCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
-
-	return so, nil
 }
 
 // FindYearlyTransactionAmount is the resolver for the findYearlyTransactionAmount field.
 func (r *queryResolver) FindYearlyTransactionAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransactionAmount", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindYearlyTransactionAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTransactionCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindYearlyTransactionAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransactionAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTransactionCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
-
-	return so, nil
 }
 
 // FindMonthlyTransferSenderAmount is the resolver for the findMonthlyTransferSenderAmount field.
 func (r *queryResolver) FindMonthlyTransferSenderAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransferSenderAmount", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferSenderAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTransferSenderCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferSenderAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransferSenderAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTransferSenderCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
-
-	return so, nil
 }
 
 // FindYearlyTransferSenderAmount is the resolver for the findYearlyTransferSenderAmount field.
 func (r *queryResolver) FindYearlyTransferSenderAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransferSenderAmount", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferSenderAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTransferSenderCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferSenderAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransferSenderAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTransferSenderCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
-
-	return so, nil
 }
 
 // FindMonthlyTransferReceiverAmount is the resolver for the findMonthlyTransferReceiverAmount field.
 func (r *queryResolver) FindMonthlyTransferReceiverAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransferReceiverAmount", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferReceiverAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTransferReceiverCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferReceiverAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransferReceiverAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTransferReceiverCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
-
-	return so, nil
 }
 
 // FindYearlyTransferReceiverAmount is the resolver for the findYearlyTransferReceiverAmount field.
 func (r *queryResolver) FindYearlyTransferReceiverAmount(ctx context.Context, input model.FindYearInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransferReceiverAmount", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferReceiverAmount(ctx, &pb.FindYearAmount{
-		Year: year,
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTransferReceiverCache(ctx, int(year))
+		if found {
+			return cachedData, nil
+		}
+
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferReceiverAmount(ctx, &pb.FindYearAmount{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransferReceiverAmount")
+		}
+
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTransferReceiverCache(ctx, int(year), so)
+
+		return so, nil
 	})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
-
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
-
-	return so, nil
 }
 
 // FindMonthlyBalanceByCardNumber is the resolver for the findMonthlyBalanceByCardNumber field.
 func (r *queryResolver) FindMonthlyBalanceByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseMonthlyBalance, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyBalanceByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseMonthlyBalance, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pbstats.FindYearBalanceCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyBalanceByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsBalanceClient.FindMonthlyBalanceByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &cardstatpb.FindYearBalanceCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyBalances(res)
+		res, err := r.CardGraphql.CardClient.CardStatsBalanceClient.FindMonthlyBalanceByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyBalanceByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyBalances(res)
+
+		r.CardGraphql.Cache.SetMonthlyBalanceByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyBalanceByCardNumber is the resolver for the findYearlyBalanceByCardNumber field.
 func (r *queryResolver) FindYearlyBalanceByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseYearlyBalance, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyBalanceByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseYearlyBalance, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pbstats.FindYearBalanceCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetYearlyBalanceByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsBalanceClient.FindYearlyBalanceByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &cardstatpb.FindYearBalanceCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyBalances(res)
+		res, err := r.CardGraphql.CardClient.CardStatsBalanceClient.FindYearlyBalanceByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyBalanceByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyBalances(res)
+
+		r.CardGraphql.Cache.SetYearlyBalanceByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindMonthlyTopupAmountByCardNumber is the resolver for the findMonthlyTopupAmountByCardNumber field.
 func (r *queryResolver) FindMonthlyTopupAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTopupByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindMonthlyTopupAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindMonthlyTopupAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTopupByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyTopupAmountByCardNumber is the resolver for the findYearlyTopupAmountByCardNumber field.
 func (r *queryResolver) FindYearlyTopupAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTopupByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindYearlyTopupAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTopupAmountClient.FindYearlyTopupAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTopupByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindMonthlyWithdrawAmountByCardNumber is the resolver for the findMonthlyWithdrawAmountByCardNumber field.
 func (r *queryResolver) FindMonthlyWithdrawAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyWithdrawAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyWithdrawByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindMonthlyWithdrawAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindMonthlyWithdrawAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyWithdrawAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyWithdrawByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyWithdrawAmountByCardNumber is the resolver for the findYearlyWithdrawAmountByCardNumber field.
 func (r *queryResolver) FindYearlyWithdrawAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyWithdrawAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetYearlyWithdrawByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindYearlyWithdrawAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsWithdrawAmountClient.FindYearlyWithdrawAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyWithdrawAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyWithdrawByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindMonthlyTransactionAmountByCardNumber is the resolver for the findMonthlyTransactionAmountByCardNumber field.
 func (r *queryResolver) FindMonthlyTransactionAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransactionAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTransactionByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindMonthlyTransactionAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindMonthlyTransactionAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransactionAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTransactionByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyTransactionAmountByCardNumber is the resolver for the findYearlyTransactionAmountByCardNumber field.
 func (r *queryResolver) FindYearlyTransactionAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransactionAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTransactionByNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindYearlyTransactionAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTransactionAmountClient.FindYearlyTransactionAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransactionAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTransactionByNumberCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindMonthlyTransferSenderAmountByCardNumber is the resolver for the findMonthlyTransferSenderAmountByCardNumber field.
 func (r *queryResolver) FindMonthlyTransferSenderAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransferSenderAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTransferBySenderCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferSenderAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferSenderAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransferSenderAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTransferBySenderCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyTransferSenderAmountByCardNumber is the resolver for the findYearlyTransferSenderAmountByCardNumber field.
 func (r *queryResolver) FindYearlyTransferSenderAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransferSenderAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTransferBySenderCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferSenderAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferSenderAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransferSenderAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTransferBySenderCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindMonthlyTransferReceiverAmountByCardNumber is the resolver for the findMonthlyTransferReceiverAmountByCardNumber field.
 func (r *queryResolver) FindMonthlyTransferReceiverAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseMonthlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransferReceiverAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseMonthlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetMonthlyTransferByReceiverCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferReceiverAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindMonthlyTransferReceiverAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransferReceiverAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlMonthlyAmounts(res)
+
+		r.CardGraphql.Cache.SetMonthlyTransferByReceiverCache(ctx, &input, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyTransferReceiverAmountByCardNumber is the resolver for the findYearlyTransferReceiverAmountByCardNumber field.
 func (r *queryResolver) FindYearlyTransferReceiverAmountByCardNumber(ctx context.Context, input model.FindYearCardNumberInput) (*model.APIResponseYearlyAmount, error) {
-	year := int32(input.Year)
-	card_number := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransferReceiverAmountByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseYearlyAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
-	if card_number == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	req := &pb.FindYearAmountCardNumber{
-		Year:       year,
-		CardNumber: card_number,
-	}
+		cachedData, found := r.CardGraphql.Cache.GetYearlyTransferByReceiverCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	res, errResp := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferReceiverAmountByCardNumber(ctx, req)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		req := &pb.FindYearAmountCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+		res, err := r.CardGraphql.CardClient.CardStatsTransferAmountClient.FindYearlyTransferReceiverAmountByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransferReceiverAmountByCardNumber")
+		}
 
-	return so, nil
+		so := r.CardGraphql.Mapping.ToGraphqlYearlyAmounts(res)
+
+		r.CardGraphql.Cache.SetYearlyTransferByReceiverCache(ctx, &input, so)
+
+		return so, nil
+	})
 }

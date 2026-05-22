@@ -9,7 +9,6 @@ import (
 	"fmt"
 
 	mycontext "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/context"
-	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
@@ -18,171 +17,206 @@ import (
 
 // VerifyCode is the resolver for the verifyCode field.
 func (r *mutationResolver) VerifyCode(ctx context.Context, input model.VerifyCodeInput) (*model.APIResponseVerifyCode, error) {
-	req := &pb.VerifyCodeRequest{
-		Code: input.Code,
-	}
+	return ResolverHandle(r.ResolverHandle, "VerifyCode", ctx, func(ctx context.Context) (*model.APIResponseVerifyCode, error) {
+		req := &pb.VerifyCodeRequest{
+			Code: input.Code,
+		}
 
-	res, err := r.AuthGraphql.AuthClient.VerifyCode(ctx, req)
+		res, err := r.AuthGraphql.AuthClient.VerifyCode(ctx, req)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "VerifyCode")
+		}
 
-	so := r.AuthGraphql.Mapping.ToGraphqlVerifyCode(res)
+		so := r.AuthGraphql.Mapping.ToGraphqlVerifyCode(res)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // ForgotPassword is the resolver for the forgotPassword field.
 func (r *mutationResolver) ForgotPassword(ctx context.Context, input model.ForgotPasswordInput) (*model.APIResponseForgotPassword, error) {
-	request := &requests.ForgotPasswordRequest{
-		Email: input.Email,
-	}
+	return ResolverHandle(r.ResolverHandle, "ForgotPassword", ctx, func(ctx context.Context) (*model.APIResponseForgotPassword, error) {
+		request := &requests.ForgotPasswordRequest{
+			Email: input.Email,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, sharedErrors.NewValidationError(validations)
+		}
 
-	req := &pb.ForgotPasswordRequest{
-		Email: input.Email,
-	}
+		req := &pb.ForgotPasswordRequest{
+			Email: input.Email,
+		}
 
-	res, err := r.AuthGraphql.AuthClient.ForgotPassword(ctx, req)
+		res, err := r.AuthGraphql.AuthClient.ForgotPassword(ctx, req)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "ForgotPassword")
+		}
 
-	so := r.AuthGraphql.Mapping.ToGraphqlForgotPassword(res)
+		so := r.AuthGraphql.Mapping.ToGraphqlForgotPassword(res)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // ResetPassword is the resolver for the resetPassword field.
 func (r *mutationResolver) ResetPassword(ctx context.Context, input model.ResetPasswordInput) (*model.APIResponseResetPassword, error) {
-	request := &requests.CreateResetPasswordRequest{
-		ResetToken:      input.ResetToken,
-		Password:        input.Password,
-		ConfirmPassword: input.ConfirmPassword,
-	}
+	return ResolverHandle(r.ResolverHandle, "ResetPassword", ctx, func(ctx context.Context) (*model.APIResponseResetPassword, error) {
+		request := &requests.CreateResetPasswordRequest{
+			ResetToken:      input.ResetToken,
+			Password:        input.Password,
+			ConfirmPassword: input.ConfirmPassword,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, sharedErrors.NewValidationError(validations)
+		}
 
-	req := &pb.ResetPasswordRequest{
-		ResetToken:      input.ResetToken,
-		Password:        input.Password,
-		ConfirmPassword: input.ConfirmPassword,
-	}
+		req := &pb.ResetPasswordRequest{
+			ResetToken:      input.ResetToken,
+			Password:        input.Password,
+			ConfirmPassword: input.ConfirmPassword,
+		}
 
-	res, err := r.AuthGraphql.AuthClient.ResetPassword(ctx, req)
+		res, err := r.AuthGraphql.AuthClient.ResetPassword(ctx, req)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "ResetPassword")
+		}
 
-	so := r.AuthGraphql.Mapping.ToGraphqlResetPassword(res)
+		so := r.AuthGraphql.Mapping.ToGraphqlResetPassword(res)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // RegisterUser is the resolver for the registerUser field.
 func (r *mutationResolver) RegisterUser(ctx context.Context, input model.RegisterInput) (*model.APIResponseRegister, error) {
-	request := &requests.RegisterRequest{
-		FirstName:       input.Firstname,
-		LastName:        input.Lastname,
-		Email:           input.Email,
-		Password:        input.Password,
-		ConfirmPassword: input.ConfirmPassword,
-	}
+	return ResolverHandle(r.ResolverHandle, "RegisterUser", ctx, func(ctx context.Context) (*model.APIResponseRegister, error) {
+		request := &requests.RegisterRequest{
+			FirstName:       input.Firstname,
+			LastName:        input.Lastname,
+			Email:           input.Email,
+			Password:        input.Password,
+			ConfirmPassword: input.ConfirmPassword,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, sharedErrors.NewValidationError(validations)
+		}
 
-	req := &pb.RegisterRequest{
-		Firstname:       input.Firstname,
-		Lastname:        input.Lastname,
-		Email:           input.Email,
-		Password:        input.Password,
-		ConfirmPassword: input.ConfirmPassword,
-	}
+		req := &pb.RegisterRequest{
+			Firstname:       request.FirstName,
+			Lastname:        request.LastName,
+			Email:           request.Email,
+			Password:        request.Password,
+			ConfirmPassword: request.ConfirmPassword,
+		}
 
-	res, err := r.AuthGraphql.AuthClient.RegisterUser(ctx, req)
+		res, err := r.AuthGraphql.AuthClient.RegisterUser(ctx, req)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RegisterUser")
+		}
 
-	so := r.AuthGraphql.Mapping.ToGraphqlResponseRegister(res)
+		so := r.AuthGraphql.Mapping.ToGraphqlResponseRegister(res)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // LoginUser is the resolver for the loginUser field.
 func (r *mutationResolver) LoginUser(ctx context.Context, input model.LoginInput) (*model.APIResponseLogin, error) {
-	request := &requests.AuthRequest{
-		Email:    input.Email,
-		Password: input.Password,
-	}
+	return ResolverHandle(r.ResolverHandle, "LoginUser", ctx, func(ctx context.Context) (*model.APIResponseLogin, error) {
+		request := &requests.AuthRequest{
+			Email:    input.Email,
+			Password: input.Password,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, sharedErrors.NewValidationError(validations)
+		}
 
-	req := &pb.LoginRequest{
-		Email:    input.Email,
-		Password: input.Password,
-	}
+		cachedResponse, found := r.AuthGraphql.Cache.GetCachedLogin(ctx, request.Email)
+		if found {
+			return cachedResponse, nil
+		}
 
-	res, err := r.AuthGraphql.AuthClient.LoginUser(ctx, req)
+		req := &pb.LoginRequest{
+			Email:    request.Email,
+			Password: request.Password,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.AuthGraphql.AuthClient.LoginUser(ctx, req)
 
-	so := r.AuthGraphql.Mapping.ToGraphqlResponseLogin(res)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "LoginUser")
+		}
 
-	return so, nil
+		so := r.AuthGraphql.Mapping.ToGraphqlResponseLogin(res)
+
+		r.AuthGraphql.Cache.SetCachedLogin(ctx, req.Email, so)
+
+		return so, nil
+	})
 }
 
 // RefreshToken is the resolver for the refreshToken field.
 func (r *mutationResolver) RefreshToken(ctx context.Context, input model.RefreshTokenInput) (*model.APIResponseRefreshToken, error) {
-	res, err := r.AuthGraphql.AuthClient.RefreshToken(ctx, &pb.RefreshTokenRequest{
-		RefreshToken: input.RefreshToken,
+	return ResolverHandle(r.ResolverHandle, "RefreshToken", ctx, func(ctx context.Context) (*model.APIResponseRefreshToken, error) {
+		cachedResponse, found := r.AuthGraphql.Cache.GetRefreshToken(ctx, input.RefreshToken)
+		if found {
+			return cachedResponse, nil
+		}
+
+		res, err := r.AuthGraphql.AuthClient.RefreshToken(ctx, &pb.RefreshTokenRequest{
+			RefreshToken: input.RefreshToken,
+		})
+
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RefreshToken")
+		}
+
+		so := r.AuthGraphql.Mapping.ToGraphqlResponseRefreshToken(res)
+
+		r.AuthGraphql.Cache.SetRefreshToken(ctx, input.RefreshToken, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.AuthGraphql.Mapping.ToGraphqlResponseRefreshToken(res)
-
-	return so, nil
 }
 
 // GetMe is the resolver for the getMe field.
 func (r *queryResolver) GetMe(ctx context.Context, input model.GetMeInput) (*model.APIResponseGetMe, error) {
-	uid, ok := mycontext.UserForContext(ctx)
+	return ResolverHandle(r.ResolverHandle, "GetMe", ctx, func(ctx context.Context) (*model.APIResponseGetMe, error) {
+		uid, ok := mycontext.UserForContext(ctx)
 
-	if !ok || uid == 0 {
-		return nil, fmt.Errorf("unauthorized: user ID not found in request context")
-	}
+		if !ok || uid == 0 {
+			return nil, fmt.Errorf("unauthorized: user ID not found in request context")
+		}
 
-	res, err := r.AuthGraphql.AuthClient.GetMe(ctx, &pb.GetMeRequest{UserId: int32(uid)})
+		cachedResponse, found := r.AuthGraphql.Cache.GetCachedUserInfo(ctx, uid)
+		if found {
+			return cachedResponse, nil
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.AuthGraphql.AuthClient.GetMe(ctx, &pb.GetMeRequest{UserId: int32(uid)})
 
-	so := r.AuthGraphql.Mapping.ToGraphqlResponseGetMe(res)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "GetMe")
+		}
 
-	return so, nil
+		so := r.AuthGraphql.Mapping.ToGraphqlResponseGetMe(res)
+
+		r.AuthGraphql.Cache.SetCachedUserInfo(ctx, uid, so)
+
+		return so, nil
+	})
 }
 
 // Mutation returns MutationResolver implementation.

@@ -7,281 +7,391 @@ package graph
 import (
 	"context"
 
-	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/role"
-	"google.golang.org/protobuf/types/known/emptypb"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
-	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CreateRole is the resolver for the createRole field.
 func (r *mutationResolver) CreateRole(ctx context.Context, input model.CreateRoleInput) (*model.APIResponseRole, error) {
-	request := &requests.CreateRoleRequest{
-		Name: input.Name,
-	}
+	return ResolverHandle(r.ResolverHandle, "CreateRole", ctx, func(ctx context.Context) (*model.APIResponseRole, error) {
+		req := requests.CreateRoleRequest{
+			Name: input.Name,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := req.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	req := &pb.CreateRoleRequest{
-		Name: input.Name,
-	}
+		reqPb := &pb.CreateRoleRequest{
+			Name: req.Name,
+		}
 
-	role, err := r.RoleGraphql.RoleClient.RoleCommandClient.CreateRole(ctx, req)
+		role, err := r.RoleGraphql.RoleClient.RoleCommandClient.CreateRole(ctx, reqPb)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "CreateRole")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseRole(role)
-
-	return so, nil
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseRole(role)
+		return so, nil
+	})
 }
 
 // UpdateRole is the resolver for the updateRole field.
 func (r *mutationResolver) UpdateRole(ctx context.Context, input model.UpdateRoleInput) (*model.APIResponseRole, error) {
-	roleId := int32(input.ID)
+	return ResolverHandle(r.ResolverHandle, "UpdateRole", ctx, func(ctx context.Context) (*model.APIResponseRole, error) {
+		roleId := int(input.ID)
 
-	if roleId == 0 {
-		return nil, graphqlerror.ErrGraphqlRoleInvalidId
-	}
+		if roleId == 0 {
+			return nil, errors.NewBadRequestError("invalid request: role ID cannot be zero")
+		}
 
-	id := int(roleId)
-	request := &requests.UpdateRoleRequest{
-		ID:   &id,
-		Name: input.Name,
-	}
+		req := &requests.UpdateRoleRequest{
+			ID:   &roleId,
+			Name: input.Name,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := req.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	req := &pb.UpdateRoleRequest{
-		Id:   roleId,
-		Name: input.Name,
-	}
+		reqPb := &pb.UpdateRoleRequest{
+			Id:   int32(*req.ID),
+			Name: req.Name,
+		}
 
-	role, err := r.RoleGraphql.RoleClient.RoleCommandClient.UpdateRole(ctx, req)
+		role, err := r.RoleGraphql.RoleClient.RoleCommandClient.UpdateRole(ctx, reqPb)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "UpdateRole")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseRole(role)
 
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseRole(role)
+		r.RoleGraphql.Cache.DeleteCachedRole(ctx, roleId)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // TrashedRole is the resolver for the trashedRole field.
 func (r *mutationResolver) TrashedRole(ctx context.Context, input model.FindByIDRoleInput) (*model.APIResponseRoleDeleteAt, error) {
-	roleID := int32(input.RoleID)
+	return ResolverHandle(r.ResolverHandle, "TrashedRole", ctx, func(ctx context.Context) (*model.APIResponseRoleDeleteAt, error) {
+		roleID := int32(input.RoleID)
 
-	if roleID == 0 {
-		return nil, graphqlerror.ErrGraphqlRoleInvalidId
-	}
+		if roleID == 0 {
+			return nil, errors.NewBadRequestError("invalid request: role ID cannot be zero")
+		}
 
-	role, err := r.RoleGraphql.RoleClient.RoleCommandClient.TrashedRole(ctx, &pb.FindByIdRoleRequest{
-		RoleId: roleID,
+		role, err := r.RoleGraphql.RoleClient.RoleCommandClient.TrashedRole(ctx, &pb.FindByIdRoleRequest{
+			RoleId: roleID,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "TrashedRole")
+		}
+
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseRoleDeleteAt(role)
+		r.RoleGraphql.Cache.DeleteCachedRole(ctx, int(roleID))
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseRoleDeleteAt(role)
-
-	return so, nil
 }
 
 // RestoreRole is the resolver for the restoreRole field.
 func (r *mutationResolver) RestoreRole(ctx context.Context, input model.FindByIDRoleInput) (*model.APIResponseRoleDeleteAt, error) {
-	roleID := int32(input.RoleID)
+	return ResolverHandle(r.ResolverHandle, "RestoreRole", ctx, func(ctx context.Context) (*model.APIResponseRoleDeleteAt, error) {
+		roleID := int32(input.RoleID)
 
-	if roleID == 0 {
-		return nil, graphqlerror.ErrGraphqlRoleInvalidId
-	}
+		if roleID == 0 {
+			return nil, errors.NewBadRequestError("invalid request: role ID cannot be zero")
+		}
 
-	role, err := r.RoleGraphql.RoleClient.RoleCommandClient.RestoreRole(ctx, &pb.FindByIdRoleRequest{
-		RoleId: roleID,
+		role, err := r.RoleGraphql.RoleClient.RoleCommandClient.RestoreRole(ctx, &pb.FindByIdRoleRequest{
+			RoleId: roleID,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreRole")
+		}
+
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseRoleDeleteAt(role)
+
+		r.RoleGraphql.Cache.DeleteCachedRole(ctx, int(roleID))
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseRoleDeleteAt(role)
-
-	return so, nil
 }
 
 // DeleteRolePermanent is the resolver for the deleteRolePermanent field.
 func (r *mutationResolver) DeleteRolePermanent(ctx context.Context, input model.FindByIDRoleInput) (*model.APIResponseRoleDelete, error) {
-	roleID := int32(input.RoleID)
+	return ResolverHandle(r.ResolverHandle, "DeleteRolePermanent", ctx, func(ctx context.Context) (*model.APIResponseRoleDelete, error) {
+		roleID := int32(input.RoleID)
 
-	if roleID == 0 {
-		return nil, graphqlerror.ErrGraphqlRoleInvalidId
-	}
+		if roleID == 0 {
+			return nil, errors.NewBadRequestError("invalid request: role ID cannot be zero")
+		}
 
-	role, err := r.RoleGraphql.RoleClient.RoleCommandClient.DeleteRolePermanent(ctx, &pb.FindByIdRoleRequest{
-		RoleId: roleID,
+		role, err := r.RoleGraphql.RoleClient.RoleCommandClient.DeleteRolePermanent(ctx, &pb.FindByIdRoleRequest{
+			RoleId: roleID,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteRolePermanent")
+		}
+
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseDelete(role)
+
+		r.RoleGraphql.Cache.DeleteCachedRole(ctx, int(roleID))
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseDelete(role)
-
-	return so, nil
 }
 
 // RestoreAllRole is the resolver for the restoreAllRole field.
 func (r *mutationResolver) RestoreAllRole(ctx context.Context) (*model.APIResponseRoleAll, error) {
-	res, errResp := r.RoleGraphql.RoleClient.RoleCommandClient.RestoreAllRole(ctx, &emptypb.Empty{})
+	return ResolverHandle(r.ResolverHandle, "RestoreAllRole", ctx, func(ctx context.Context) (*model.APIResponseRoleAll, error) {
+		res, err := r.RoleGraphql.RoleClient.RoleCommandClient.RestoreAllRole(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreAllRole")
+		}
 
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
-
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseAll(res)
-
-	return so, nil
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseAll(res)
+		return so, nil
+	})
 }
 
 // DeleteAllRolePermanent is the resolver for the deleteAllRolePermanent field.
 func (r *mutationResolver) DeleteAllRolePermanent(ctx context.Context) (*model.APIResponseRoleAll, error) {
-	res, errResp := r.RoleGraphql.RoleClient.RoleCommandClient.DeleteAllRolePermanent(ctx, &emptypb.Empty{})
+	return ResolverHandle(r.ResolverHandle, "DeleteAllRolePermanent", ctx, func(ctx context.Context) (*model.APIResponseRoleAll, error) {
+		res, err := r.RoleGraphql.RoleClient.RoleCommandClient.DeleteAllRolePermanent(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteAllRolePermanent")
+		}
 
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
-
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseAll(res)
-
-	return so, nil
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseAll(res)
+		return so, nil
+	})
 }
 
 // FindAllRole is the resolver for the findAllRole field.
 func (r *queryResolver) FindAllRole(ctx context.Context, input model.FindAllRoleInput) (*model.APIResponsePaginationRole, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindAllRole", ctx, func(ctx context.Context) (*model.APIResponsePaginationRole, error) {
+		// Normalize input for consistent caching and backend request
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllRoleRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, errResp := r.RoleGraphql.RoleClient.RoleQueryClient.FindAllRole(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		// Use a normalized struct for the cache key
+		normalizedInput := &model.FindAllRoleInput{
+			Page:     &page,
+			PageSize: &pageSize,
+			Search:   &search,
+		}
 
-	so := r.RoleGraphql.Mapping.ToGraphqlResponsePaginationRole(res)
+		cachedData, found := r.RoleGraphql.Cache.GetCachedRoles(ctx, normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	return so, nil
+		reqService := &pb.FindAllRoleRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
+
+		res, err := r.RoleGraphql.RoleClient.RoleQueryClient.FindAllRole(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllRole")
+		}
+
+		so := r.RoleGraphql.Mapping.ToGraphqlResponsePaginationRole(res)
+
+		r.RoleGraphql.Cache.SetCachedRoles(ctx, normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByIDRole is the resolver for the findByIdRole field.
 func (r *queryResolver) FindByIDRole(ctx context.Context, input model.FindByIDRoleInput) (*model.APIResponseRole, error) {
-	id := int32(input.RoleID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlRoleInvalidUserId
-	}
+	return ResolverHandle(r.ResolverHandle, "FindByIDRole", ctx, func(ctx context.Context) (*model.APIResponseRole, error) {
+		id := int(input.RoleID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: role ID cannot be zero")
+		}
 
-	role, errResp := r.RoleGraphql.RoleClient.RoleQueryClient.FindByIdRole(ctx, &pb.FindByIdRoleRequest{RoleId: id})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		cachedData, found := r.RoleGraphql.Cache.GetCachedRoleById(ctx, id)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.RoleGraphql.Mapping.ToGraphqlResponseRole(role)
+		role, err := r.RoleGraphql.RoleClient.RoleQueryClient.FindByIdRole(ctx, &pb.FindByIdRoleRequest{RoleId: int32(id)})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByIDRole")
+		}
 
-	return so, nil
+		so := r.RoleGraphql.Mapping.ToGraphqlResponseRole(role)
+
+		r.RoleGraphql.Cache.SetCachedRoleById(ctx, id, so)
+
+		return so, nil
+	})
 }
 
 // FindByActiveRole is the resolver for the findByActiveRole field.
 func (r *queryResolver) FindByActiveRole(ctx context.Context, input model.FindAllRoleInput) (*model.APIResponsePaginationRoleDeleteAt, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindByActiveRole", ctx, func(ctx context.Context) (*model.APIResponsePaginationRoleDeleteAt, error) {
+		// Normalize input for consistent caching and backend request
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllRoleRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, errResp := r.RoleGraphql.RoleClient.RoleQueryClient.FindByActive(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		// Use a normalized struct for the cache key
+		normalizedInput := &model.FindAllRoleInput{
+			Page:     &page,
+			PageSize: &pageSize,
+			Search:   &search,
+		}
 
-	so := r.RoleGraphql.Mapping.ToGraphqlResponsePaginationRoleDeleteAt(res)
+		cachedData, found := r.RoleGraphql.Cache.GetCachedRoleActive(ctx, normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	return so, nil
+		reqService := &pb.FindAllRoleRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
+
+		res, err := r.RoleGraphql.RoleClient.RoleQueryClient.FindByActive(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByActiveRole")
+		}
+
+		so := r.RoleGraphql.Mapping.ToGraphqlResponsePaginationRoleDeleteAt(res)
+
+		r.RoleGraphql.Cache.SetCachedRoleActive(ctx, normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByTrashedRole is the resolver for the findByTrashedRole field.
 func (r *queryResolver) FindByTrashedRole(ctx context.Context, input model.FindAllRoleInput) (*model.APIResponsePaginationRoleDeleteAt, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindByTrashedRole", ctx, func(ctx context.Context) (*model.APIResponsePaginationRoleDeleteAt, error) {
+		// Normalize input for consistent caching and backend request
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllRoleRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		if page <= 0 {
+			page = 1
+		}
+		if pageSize <= 0 {
+			pageSize = 10
+		}
 
-	res, errResp := r.RoleGraphql.RoleClient.RoleQueryClient.FindByTrashed(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		normalizedInput := &model.FindAllRoleInput{
+			Page:     &page,
+			PageSize: &pageSize,
+			Search:   &search,
+		}
 
-	so := r.RoleGraphql.Mapping.ToGraphqlResponsePaginationRoleDeleteAt(res)
+		cachedData, found := r.RoleGraphql.Cache.GetCachedRoleTrashed(ctx, normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	return so, nil
+		reqService := &pb.FindAllRoleRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
+
+		res, err := r.RoleGraphql.RoleClient.RoleQueryClient.FindByTrashed(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByTrashedRole")
+		}
+
+		so := r.RoleGraphql.Mapping.ToGraphqlResponsePaginationRoleDeleteAt(res)
+
+		r.RoleGraphql.Cache.SetCachedRoleTrashed(ctx, normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByUserIDRole is the resolver for the findByUserIdRole field.
 func (r *queryResolver) FindByUserIDRole(ctx context.Context, input model.FindByUserIDRoleInput) (*model.APIResponsesRole, error) {
-	id := int32(input.UserID)
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlRoleInvalidUserId
-	}
+	return ResolverHandle(r.ResolverHandle, "FindByUserIDRole", ctx, func(ctx context.Context) (*model.APIResponsesRole, error) {
+		userId := int(input.UserID)
+		if userId <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: user ID must be greater than zero")
+		}
 
-	role, errResp := r.RoleGraphql.RoleClient.RoleQueryClient.FindByUserId(ctx, &pb.FindByIdUserRoleRequest{UserId: id})
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		cachedData, found := r.RoleGraphql.Cache.GetCachedRoleByUserId(ctx, userId)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.RoleGraphql.Mapping.ToGraphqlResponsesRole(role)
+		res, err := r.RoleGraphql.RoleClient.RoleQueryClient.FindByUserId(ctx, &pb.FindByIdUserRoleRequest{
+			UserId: int32(userId),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByUserIDRole")
+		}
 
-	return so, nil
+		so := r.RoleGraphql.Mapping.ToGraphqlResponsesRole(res)
+
+		r.RoleGraphql.Cache.SetCachedRoleByUserId(ctx, userId, so)
+
+		return so, nil
+	})
 }
+

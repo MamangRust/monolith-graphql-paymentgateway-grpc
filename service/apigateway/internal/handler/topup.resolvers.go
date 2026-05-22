@@ -6,724 +6,960 @@ package graph
 
 import (
 	"context"
-	"fmt"
 
-	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/topup"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
-	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	errors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // CreateTopup is the resolver for the createTopup field.
 func (r *mutationResolver) CreateTopup(ctx context.Context, input model.CreateTopupInput) (*model.APIResponseTopup, error) {
-	request := &requests.CreateTopupRequest{
-		CardNumber:  input.CardNumber,
-		TopupAmount: int(input.TopupAmount),
-		TopupMethod: input.TopupMethod,
-	}
+	return ResolverHandle(r.ResolverHandle, "CreateTopup", ctx, func(ctx context.Context) (*model.APIResponseTopup, error) {
+		request := requests.CreateTopupRequest{
+			CardNumber:  input.CardNumber,
+			TopupAmount: int(input.TopupAmount),
+			TopupMethod: input.TopupMethod,
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	req := &pb.CreateTopupRequest{
-		CardNumber:  input.CardNumber,
-		TopupAmount: int32(input.TopupAmount),
-		TopupMethod: input.TopupMethod,
-	}
+		req := &pb.CreateTopupRequest{
+			CardNumber:  input.CardNumber,
+			TopupAmount: int32(input.TopupAmount),
+			TopupMethod: input.TopupMethod,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.CreateTopup(ctx, req)
+		res, err := r.TopupGraphql.TopupClient.TopupCommandClient.CreateTopup(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "CreateTopup")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // UpdateTopup is the resolver for the updateTopup field.
 func (r *mutationResolver) UpdateTopup(ctx context.Context, input model.UpdateTopupInput) (*model.APIResponseTopup, error) {
-	id := int(input.TopupID)
+	return ResolverHandle(r.ResolverHandle, "UpdateTopup", ctx, func(ctx context.Context) (*model.APIResponseTopup, error) {
+		id := int(input.TopupID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: topup ID cannot be zero")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidID
-	}
+		request := requests.UpdateTopupRequest{
+			TopupID:     &id,
+			CardNumber:  input.CardNumber,
+			TopupAmount: int(input.TopupAmount),
+			TopupMethod: input.TopupMethod,
+		}
 
-	request := &requests.UpdateTopupRequest{
-		TopupID:     &id,
-		CardNumber:  input.CardNumber,
-		TopupAmount: int(input.TopupAmount),
-		TopupMethod: input.TopupMethod,
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		req := &pb.UpdateTopupRequest{
+			TopupId:     int32(id),
+			CardNumber:  input.CardNumber,
+			TopupAmount: int32(input.TopupAmount),
+			TopupMethod: input.TopupMethod,
+		}
 
-	req := &pb.UpdateTopupRequest{
-		TopupId:     int32(id),
-		CardNumber:  input.CardNumber,
-		TopupAmount: int32(input.TopupAmount),
-		TopupMethod: input.TopupMethod,
-	}
+		res, err := r.TopupGraphql.TopupClient.TopupCommandClient.UpdateTopup(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "UpdateTopup")
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.UpdateTopup(ctx, req)
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(res)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		r.TopupGraphql.Cache.DeleteCachedTopupCache(ctx, id)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // TrashedTopup is the resolver for the trashedTopup field.
 func (r *mutationResolver) TrashedTopup(ctx context.Context, input model.FindByIDTopupInput) (*model.APIResponseTopupDeleteAt, error) {
-	id := int32(input.TopupID)
+	return ResolverHandle(r.ResolverHandle, "TrashedTopup", ctx, func(ctx context.Context) (*model.APIResponseTopupDeleteAt, error) {
+		id := int(input.TopupID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: topup ID cannot be zero")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidID
-	}
+		topup, err := r.TopupGraphql.TopupClient.TopupCommandClient.TrashedTopup(ctx, &pb.FindByIdTopupRequest{
+			TopupId: int32(id),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "TrashedTopup")
+		}
 
-	topup, err := r.TopupGraphql.TopupClient.TopupCommandClient.TrashedTopup(ctx, &pb.FindByIdTopupRequest{
-		TopupId: id,
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupDeleteAt(topup)
+
+		r.TopupGraphql.Cache.DeleteCachedTopupCache(ctx, id)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupDeleteAt(topup)
-
-	return so, nil
 }
 
 // RestoreTopup is the resolver for the restoreTopup field.
 func (r *mutationResolver) RestoreTopup(ctx context.Context, input model.FindByIDTopupInput) (*model.APIResponseTopupDeleteAt, error) {
-	id := int32(input.TopupID)
+	return ResolverHandle(r.ResolverHandle, "RestoreTopup", ctx, func(ctx context.Context) (*model.APIResponseTopupDeleteAt, error) {
+		id := int(input.TopupID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: topup ID cannot be zero")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidID
-	}
+		topup, err := r.TopupGraphql.TopupClient.TopupCommandClient.RestoreTopup(ctx, &pb.FindByIdTopupRequest{
+			TopupId: int32(id),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreTopup")
+		}
 
-	topup, err := r.TopupGraphql.TopupClient.TopupCommandClient.RestoreTopup(ctx, &pb.FindByIdTopupRequest{
-		TopupId: id,
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupDeleteAt(topup)
+
+		r.TopupGraphql.Cache.DeleteCachedTopupCache(ctx, id)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupDeleteAt(topup)
-
-	return so, nil
 }
 
 // DeleteTopupPermanent is the resolver for the deleteTopupPermanent field.
 func (r *mutationResolver) DeleteTopupPermanent(ctx context.Context, input model.FindByIDTopupInput) (*model.APIResponseTopupDelete, error) {
-	id := int32(input.TopupID)
+	return ResolverHandle(r.ResolverHandle, "DeleteTopupPermanent", ctx, func(ctx context.Context) (*model.APIResponseTopupDelete, error) {
+		id := int(input.TopupID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: topup ID cannot be zero")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidID
-	}
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.DeleteTopupPermanent(ctx, &pb.FindByIdTopupRequest{TopupId: id})
+		res, err := r.TopupGraphql.TopupClient.TopupCommandClient.DeleteTopupPermanent(ctx, &pb.FindByIdTopupRequest{TopupId: int32(id)})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteTopupPermanent")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlTopupDelete(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlTopupDelete(res)
+		r.TopupGraphql.Cache.DeleteCachedTopupCache(ctx, id)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // RestoreAllTopup is the resolver for the restoreAllTopup field.
 func (r *mutationResolver) RestoreAllTopup(ctx context.Context) (*model.APIResponseTopupAll, error) {
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.RestoreAllTopup(ctx, &emptypb.Empty{})
+	return ResolverHandle(r.ResolverHandle, "RestoreAllTopup", ctx, func(ctx context.Context) (*model.APIResponseTopupAll, error) {
+		res, err := r.TopupGraphql.TopupClient.TopupCommandClient.RestoreAllTopup(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreAllTopup")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlTopupAll(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlTopupAll(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
-// DeleteAllTopupPermanent is the resolver for the deleteAllTopupPermanent field.
+// DeleteAllTopupPermanent is the resolver for the deleteAllSaldoPermanent field.
 func (r *mutationResolver) DeleteAllTopupPermanent(ctx context.Context) (*model.APIResponseTopupAll, error) {
-	res, err := r.TopupGraphql.TopupClient.TopupCommandClient.DeleteAllTopupPermanent(ctx, &emptypb.Empty{})
+	return ResolverHandle(r.ResolverHandle, "DeleteAllTopupPermanent", ctx, func(ctx context.Context) (*model.APIResponseTopupAll, error) {
+		res, err := r.TopupGraphql.TopupClient.TopupCommandClient.DeleteAllTopupPermanent(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteAllTopupPermanent")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlTopupAll(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlTopupAll(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindAllTopup is the resolver for the findAllTopup field.
 func (r *queryResolver) FindAllTopup(ctx context.Context, input model.FindAllTopupInput) (*model.APIResponsePaginationTopup, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindAllTopup", ctx, func(ctx context.Context) (*model.APIResponsePaginationTopup, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllTopupRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		normalizedInput := model.FindAllTopupInput{
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   &search,
+		}
 
-	topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindAllTopup(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetCachedTopupsCache(ctx, &normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopup(topups)
+		reqService := &pb.FindAllTopupRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
 
-	return so, nil
+		topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindAllTopup(ctx, reqService)
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "FindAllTopup")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopup(topups)
+
+		r.TopupGraphql.Cache.SetCachedTopupsCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindAllTopupByCardNumber is the resolver for the findAllTopupByCardNumber field.
 func (r *queryResolver) FindAllTopupByCardNumber(ctx context.Context, input model.FindAllTopupByCardNumberInput) (*model.APIResponsePaginationTopup, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindAllTopupByCardNumber", ctx, func(ctx context.Context) (*model.APIResponsePaginationTopup, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
+		cardNumber := input.CardNumber
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllTopupByCardNumberRequest{
-		Page:       page,
-		PageSize:   pageSize,
-		Search:     *search,
-		CardNumber: cardNumber,
-	}
+		normalizedInput := model.FindAllTopupByCardNumberInput{
+			Page:       input.Page,
+			PageSize:   input.PageSize,
+			Search:     &search,
+			CardNumber: cardNumber,
+		}
 
-	topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindAllTopupByCardNumber(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetCacheTopupByCardCache(ctx, &normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopup(topups)
+		reqService := &pb.FindAllTopupByCardNumberRequest{
+			Page:       page,
+			PageSize:   pageSize,
+			Search:     search,
+			CardNumber: cardNumber,
+		}
 
-	return so, nil
+		topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindAllTopupByCardNumber(ctx, reqService)
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "FindAllTopupByCardNumber")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopup(topups)
+
+		r.TopupGraphql.Cache.SetCacheTopupByCardCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByIDTopup is the resolver for the findByIdTopup field.
 func (r *queryResolver) FindByIDTopup(ctx context.Context, input model.FindByIDTopupInput) (*model.APIResponseTopup, error) {
-	id := int32(input.TopupID)
+	return ResolverHandle(r.ResolverHandle, "FindByIDTopup", ctx, func(ctx context.Context) (*model.APIResponseTopup, error) {
+		id := int(input.TopupID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("invalid request: topup ID cannot be zero")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidID
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetCachedTopupCache(ctx, id)
+		if found {
+			return cachedData, nil
+		}
 
-	topup, err := r.TopupGraphql.TopupClient.TopupQueryClient.FindByIdTopup(ctx, &pb.FindByIdTopupRequest{TopupId: id})
+		topup, err := r.TopupGraphql.TopupClient.TopupQueryClient.FindByIdTopup(ctx, &pb.FindByIdTopupRequest{TopupId: int32(id)})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByIDTopup")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(topup)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(topup)
+		r.TopupGraphql.Cache.SetCachedTopupCache(ctx, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTopupStatusSuccess is the resolver for the findMonthlyTopupStatusSuccess field.
 func (r *queryResolver) FindMonthlyTopupStatusSuccess(ctx context.Context, input model.FindMonthlyTopupStatusInput) (*model.APIResponseTopupMonthStatusSuccess, error) {
-	year := int32(input.Year)
-	month := int32(input.Month)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupStatusSuccess", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthStatusSuccess, error) {
+		year := int32(input.Year)
+		month := int32(input.Month)
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if month <= 0 || month > 12 {
+			return nil, errors.NewBadRequestError("invalid request: month must be between 1 and 12")
+		}
 
-	if month <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidMonth
-	}
+		reqStatus := &requests.MonthTopupStatus{
+			Year:  int(year),
+			Month: int(month),
+		}
 
-	reqService := &pb.FindMonthlyTopupStatus{
-		Year:  year,
-		Month: month,
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthTopupStatusSuccessCache(ctx, reqStatus)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusSuccess(ctx, reqService)
+		reqService := &pb.FindMonthlyTopupStatus{
+			Year:  year,
+			Month: month,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusSuccess(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupStatusSuccess")
+		}
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusSuccess(res)
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusSuccess(res)
 
-	return so, nil
+		r.TopupGraphql.Cache.SetMonthTopupStatusSuccessCache(ctx, reqStatus, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyTopupStatusSuccess is the resolver for the findYearlyTopupStatusSuccess field.
 func (r *queryResolver) FindYearlyTopupStatusSuccess(ctx context.Context, input model.FindYearTopupStatusInput) (*model.APIResponseTopupYearStatusSuccess, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupStatusSuccess", ctx, func(ctx context.Context) (*model.APIResponseTopupYearStatusSuccess, error) {
+		year := int(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupStatusSuccessCache(ctx, year)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusSuccess(ctx, &pb.FindYearTopupStatus{
-		Year: year,
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusSuccess(ctx, &pb.FindYearTopupStatus{
+			Year: int32(year),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupStatusSuccess")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusSuccess(res)
+
+		r.TopupGraphql.Cache.SetYearlyTopupStatusSuccessCache(ctx, year, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusSuccess(res)
-
-	return so, nil
 }
 
 // FindMonthlyTopupStatusFailed is the resolver for the findMonthlyTopupStatusFailed field.
 func (r *queryResolver) FindMonthlyTopupStatusFailed(ctx context.Context, input model.FindMonthlyTopupStatusInput) (*model.APIResponseTopupMonthStatusFailed, error) {
-	year := int32(input.Year)
-	month := int32(input.Month)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupStatusFailed", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthStatusFailed, error) {
+		year := int32(input.Year)
+		month := int32(input.Month)
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if month <= 0 || month > 12 {
+			return nil, errors.NewBadRequestError("invalid request: month must be between 1 and 12")
+		}
 
-	if month <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidMonth
-	}
+		reqStatus := &requests.MonthTopupStatus{
+			Year:  int(year),
+			Month: int(month),
+		}
 
-	reqService := &pb.FindMonthlyTopupStatus{
-		Year:  year,
-		Month: month,
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthTopupStatusFailedCache(ctx, reqStatus)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusFailed(ctx, reqService)
+		reqService := &pb.FindMonthlyTopupStatus{
+			Year:  year,
+			Month: month,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusFailed(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupStatusFailed")
+		}
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusFailed(res)
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusFailed(res)
 
-	return so, nil
+		r.TopupGraphql.Cache.SetMonthTopupStatusFailedCache(ctx, reqStatus, so)
+
+		return so, nil
+	})
 }
 
 // FindYearlyTopupStatusFailed is the resolver for the findYearlyTopupStatusFailed field.
 func (r *queryResolver) FindYearlyTopupStatusFailed(ctx context.Context, input model.FindYearTopupStatusInput) (*model.APIResponseTopupYearStatusFailed, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupStatusFailed", ctx, func(ctx context.Context) (*model.APIResponseTopupYearStatusFailed, error) {
+		year := int(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupStatusFailedCache(ctx, year)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusFailed(ctx, &pb.FindYearTopupStatus{
-		Year: year,
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusFailed(ctx, &pb.FindYearTopupStatus{
+			Year: int32(year),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupStatusFailed")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusFailed(res)
+
+		r.TopupGraphql.Cache.SetYearlyTopupStatusFailedCache(ctx, year, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusFailed(res)
-
-	return so, nil
 }
 
 // FindMonthlyTopupStatusSuccessByCardNumber is the resolver for the findMonthlyTopupStatusSuccessByCardNumber field.
 func (r *queryResolver) FindMonthlyTopupStatusSuccessByCardNumber(ctx context.Context, input model.FindMonthlyTopupStatusCardNumberInput) (*model.APIResponseTopupMonthStatusSuccess, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupStatusSuccessByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthStatusSuccess, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthTopupStatusSuccessByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindMonthlyTopupStatusCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindMonthlyTopupStatusCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusSuccessByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusSuccessByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupStatusSuccessByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusSuccess(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusSuccess(res)
+		r.TopupGraphql.Cache.SetMonthTopupStatusSuccessByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTopupStatusSuccessByCardNumber is the resolver for the findYearlyTopupStatusSuccessByCardNumber field.
 func (r *queryResolver) FindYearlyTopupStatusSuccessByCardNumber(ctx context.Context, input model.FindYearTopupStatusCardNumberInput) (*model.APIResponseTopupYearStatusSuccess, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupStatusSuccessByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupYearStatusSuccess, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupStatusSuccessByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindYearTopupStatusCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTopupStatusCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusSuccessByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusSuccessByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupStatusSuccessByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusSuccess(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusSuccess(res)
+		r.TopupGraphql.Cache.SetYearlyTopupStatusSuccessByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTopupStatusFailedByCardNumber is the resolver for the findMonthlyTopupStatusFailedByCardNumber field.
 func (r *queryResolver) FindMonthlyTopupStatusFailedByCardNumber(ctx context.Context, input model.FindMonthlyTopupStatusCardNumberInput) (*model.APIResponseTopupMonthStatusFailed, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupStatusFailedByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthStatusFailed, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthTopupStatusFailedByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindMonthlyTopupStatusCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindMonthlyTopupStatusCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusFailedByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindMonthlyTopupStatusFailedByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupStatusFailedByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusFailed(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthStatusFailed(res)
+		r.TopupGraphql.Cache.SetMonthTopupStatusFailedByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTopupStatusFailedByCardNumber is the resolver for the findYearlyTopupStatusFailedByCardNumber field.
 func (r *queryResolver) FindYearlyTopupStatusFailedByCardNumber(ctx context.Context, input model.FindYearTopupStatusCardNumberInput) (*model.APIResponseTopupYearStatusFailed, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupStatusFailedByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupYearStatusFailed, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupStatusFailedByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindYearTopupStatusCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTopupStatusCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusFailedByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsStatus.FindYearlyTopupStatusFailedByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupStatusFailedByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusFailed(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearStatusFailed(res)
+		r.TopupGraphql.Cache.SetYearlyTopupStatusFailedByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTopupMethods is the resolver for the findMonthlyTopupMethods field.
 func (r *queryResolver) FindMonthlyTopupMethods(ctx context.Context, input model.FindYearTopupStatusInput) (*model.APIResponseTopupMonthMethod, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupMethods", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthMethod, error) {
+		year := int(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthlyTopupMethodsCache(ctx, year)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindMonthlyTopupMethods(ctx, &pb.FindYearTopupStatus{
-		Year: year,
+		res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindMonthlyTopupMethods(ctx, &pb.FindYearTopupStatus{
+			Year: int32(year),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupMethods")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthMethod(res)
+
+		r.TopupGraphql.Cache.SetMonthlyTopupMethodsCache(ctx, year, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthMethod(res)
-
-	return so, nil
 }
 
 // FindYearlyTopupMethods is the resolver for the findYearlyTopupMethods field.
 func (r *queryResolver) FindYearlyTopupMethods(ctx context.Context, input model.FindYearTopupStatusInput) (*model.APIResponseTopupYearMethod, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupMethods", ctx, func(ctx context.Context) (*model.APIResponseTopupYearMethod, error) {
+		year := int(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupMethodsCache(ctx, year)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindYearlyTopupMethods(ctx, &pb.FindYearTopupStatus{
-		Year: year,
+		res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindYearlyTopupMethods(ctx, &pb.FindYearTopupStatus{
+			Year: int32(year),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupMethods")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearMethod(res)
+
+		r.TopupGraphql.Cache.SetYearlyTopupMethodsCache(ctx, year, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearMethod(res)
-
-	return so, nil
 }
 
 // FindMonthlyTopupAmounts is the resolver for the findMonthlyTopupAmounts field.
 func (r *queryResolver) FindMonthlyTopupAmounts(ctx context.Context, input model.FindYearTopupStatusInput) (*model.APIResponseTopupMonthAmount, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupAmounts", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthAmount, error) {
+		year := int(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthlyTopupAmountsCache(ctx, year)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindMonthlyTopupAmounts(ctx, &pb.FindYearTopupStatus{
-		Year: year,
+		res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindMonthlyTopupAmounts(ctx, &pb.FindYearTopupStatus{
+			Year: int32(year),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupAmounts")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthAmount(res)
+
+		r.TopupGraphql.Cache.SetMonthlyTopupAmountsCache(ctx, year, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthAmount(res)
-
-	return so, nil
 }
 
 // FindYearlyTopupAmounts is the resolver for the findYearlyTopupAmounts field.
 func (r *queryResolver) FindYearlyTopupAmounts(ctx context.Context, input model.FindYearTopupStatusInput) (*model.APIResponseTopupYearAmount, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupAmounts", ctx, func(ctx context.Context) (*model.APIResponseTopupYearAmount, error) {
+		year := int(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupAmountsCache(ctx, year)
+		if found {
+			return cachedData, nil
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindYearlyTopupAmounts(ctx, &pb.FindYearTopupStatus{
-		Year: year,
+		res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindYearlyTopupAmounts(ctx, &pb.FindYearTopupStatus{
+			Year: int32(year),
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupAmounts")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearAmount(res)
+
+		r.TopupGraphql.Cache.SetYearlyTopupAmountsCache(ctx, year, so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearAmount(res)
-
-	return so, nil
 }
 
 // FindMonthlyTopupMethodsByCardNumber is the resolver for the findMonthlyTopupMethodsByCardNumber field.
 func (r *queryResolver) FindMonthlyTopupMethodsByCardNumber(ctx context.Context, input model.FindYearTopupCardNumberInput) (*model.APIResponseTopupMonthMethod, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupMethodsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthMethod, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthlyTopupMethodsByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindYearTopupCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTopupCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindMonthlyTopupMethodsByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindMonthlyTopupMethodsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupMethodsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthMethod(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthMethod(res)
+		r.TopupGraphql.Cache.SetMonthlyTopupMethodsByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTopupMethodsByCardNumber is the resolver for the findYearlyTopupMethodsByCardNumber field.
 func (r *queryResolver) FindYearlyTopupMethodsByCardNumber(ctx context.Context, input model.FindYearTopupCardNumberInput) (*model.APIResponseTopupYearMethod, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupMethodsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupYearMethod, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupMethodsByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindYearTopupCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTopupCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindYearlyTopupMethodsByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsMethod.FindYearlyTopupMethodsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupMethodsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearMethod(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearMethod(res)
+		r.TopupGraphql.Cache.SetYearlyTopupMethodsByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTopupAmountsByCardNumber is the resolver for the findMonthlyTopupAmountsByCardNumber field.
 func (r *queryResolver) FindMonthlyTopupAmountsByCardNumber(ctx context.Context, input model.FindYearTopupCardNumberInput) (*model.APIResponseTopupMonthAmount, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTopupAmountsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupMonthAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetMonthlyTopupAmountsByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindYearTopupCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTopupCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindMonthlyTopupAmountsByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindMonthlyTopupAmountsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTopupAmountsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthAmount(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupMonthAmount(res)
+		r.TopupGraphql.Cache.SetMonthlyTopupAmountsByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTopupAmountsByCardNumber is the resolver for the findYearlyTopupAmountsByCardNumber field.
 func (r *queryResolver) FindYearlyTopupAmountsByCardNumber(ctx context.Context, input model.FindYearTopupCardNumberInput) (*model.APIResponseTopupYearAmount, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTopupAmountsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTopupYearAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlTopupInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("invalid request: year must be greater than zero")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetYearlyTopupAmountsByCardNumberCache(ctx, &input)
+		if found {
+			return cachedData, nil
+		}
 
-	reqService := &pb.FindYearTopupCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTopupCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindYearlyTopupAmountsByCardNumber(ctx, reqService)
+		res, err := r.TopupGraphql.TopupClient.TopupStatsAmount.FindYearlyTopupAmountsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTopupAmountsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearAmount(res)
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponseTopupYearAmount(res)
+		r.TopupGraphql.Cache.SetYearlyTopupAmountsByCardNumberCache(ctx, &input, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindByCardNumberTopup is the resolver for the findByCardNumberTopup field.
 func (r *queryResolver) FindByCardNumberTopup(ctx context.Context, input model.FindByCardNumberTopupInput) (*model.APIResponseTopup, error) {
-	panic(fmt.Errorf("not implemented: FindByCardNumberTopup - findByCardNumberTopup"))
+	return ResolverHandle(r.ResolverHandle, "FindByCardNumberTopup", ctx, func(ctx context.Context) (*model.APIResponseTopup, error) {
+		cardNumber := input.CardNumber
+		year := int32(0)
+		if input.Year != nil {
+			year = *input.Year
+		}
+
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("invalid request: card number cannot be empty")
+		}
+
+		reqService := &pb.FindByCardNumberTopupRequest{
+			CardNumber: cardNumber,
+			Year:       year,
+		}
+
+		res, err := r.TopupGraphql.TopupClient.TopupQueryClient.FindByCardNumberTopup(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByCardNumberTopup")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponseTopup(res)
+
+		return so, nil
+	})
 }
 
 // FindByActiveTopup is the resolver for the findByActiveTopup field.
 func (r *queryResolver) FindByActiveTopup(ctx context.Context, input model.FindAllTopupInput) (*model.APIResponsePaginationTopupDeleteAt, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindByActiveTopup", ctx, func(ctx context.Context) (*model.APIResponsePaginationTopupDeleteAt, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllTopupRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		normalizedInput := model.FindAllTopupInput{
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   &search,
+		}
 
-	topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindByActive(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetCachedTopupActiveCache(ctx, &normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopupDeleteAt(topups)
+		reqService := &pb.FindAllTopupRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
 
-	return so, nil
+		topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindByActive(ctx, reqService)
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "FindByActiveTopup")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopupDeleteAt(topups)
+
+		r.TopupGraphql.Cache.SetCachedTopupActiveCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByTrashedTopup is the resolver for the findByTrashedTopup field.
 func (r *queryResolver) FindByTrashedTopup(ctx context.Context, input model.FindAllTopupInput) (*model.APIResponsePaginationTopupDeleteAt, error) {
-	page := int32(*input.Page)
-	pageSize := int32(*input.PageSize)
-	search := input.Search
+	return ResolverHandle(r.ResolverHandle, "FindByTrashedTopup", ctx, func(ctx context.Context) (*model.APIResponsePaginationTopupDeleteAt, error) {
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
 
-	if page <= 0 {
-		page = 1
-	}
-	if pageSize <= 0 {
-		pageSize = 10
-	}
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
 
-	reqService := &pb.FindAllTopupRequest{
-		Page:     page,
-		PageSize: pageSize,
-		Search:   *search,
-	}
+		normalizedInput := model.FindAllTopupInput{
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   &search,
+		}
 
-	topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindByTrashed(ctx, reqService)
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
+		cachedData, found := r.TopupGraphql.Cache.GetCachedTopupTrashedCache(ctx, &normalizedInput)
+		if found {
+			return cachedData, nil
+		}
 
-	so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopupDeleteAt(topups)
+		reqService := &pb.FindAllTopupRequest{
+			Page:     page,
+			PageSize: pageSize,
+			Search:   search,
+		}
 
-	return so, nil
+		topups, errResp := r.TopupGraphql.TopupClient.TopupQueryClient.FindByTrashed(ctx, reqService)
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "FindByTrashedTopup")
+		}
+
+		so := r.TopupGraphql.Mapping.ToGraphqlResponsePaginationTopupDeleteAt(topups)
+
+		r.TopupGraphql.Cache.SetCachedTopupTrashedCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }

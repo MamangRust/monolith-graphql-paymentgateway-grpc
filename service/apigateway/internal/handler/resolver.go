@@ -1,7 +1,10 @@
 package graph
 
 import (
+	errorstd "errors"
 	"time"
+
+	"fmt"
 
 	authgraphqlmapper "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/mapper/auth"
 	cardgraphqlmapper "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/mapper/card"
@@ -17,6 +20,17 @@ import (
 	merchantpermission "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/permission/merchant"
 	rolepermission "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/permission/role"
 	mencache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis"
+	auth_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/auth"
+	card_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/card"
+	merchant_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/merchant"
+	role_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/role"
+	saldo_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/saldo"
+	topup_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/topup"
+	transaction_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/transaction"
+	transfer_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/transfer"
+	user_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/user"
+	withdraw_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/withdraw"
+	merchant_document_cache "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/redis/api/merchant_document"
 	authpb "github.com/MamangRust/monolith-graphql-payment-gateway-pb"
 	cardpb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card"
 	cardstatpb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/card/stats"
@@ -37,10 +51,11 @@ import (
 	withdrawstatpb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/withdraw/stats"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/kafka"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-pkg/logger"
-	"google.golang.org/grpc"
-	"fmt"
-	"github.com/go-playground/validator/v10"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
 	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/observability"
+	"github.com/go-playground/validator/v10"
+	"google.golang.org/grpc"
 )
 
 // This file will not be regenerated automatically.
@@ -59,6 +74,7 @@ type Resolver struct {
 	TransactionGraphql      TransactionHandleGraphql
 	TransferGraphql         TransferHandleGraphql
 	WithdrawGraphql         WithdrawHandleGraphql
+	ResolverHandle          *resolverHandler
 }
 
 type UserClient struct {
@@ -79,7 +95,8 @@ type CardClient struct {
 	CardStatsTopupAmountClient       cardstatpb.CardStatsTopupServiceClient
 	CardStatsTransactionAmountClient cardstatpb.CardStatsTransactionServiceClient
 	CardStatsWithdrawAmountClient    cardstatpb.CardStatsWithdrawServiceClient
-	CardStatsTransferAmountClient    cardstatpb.CardStatsTransferServiceClient
+	CardStatsTransferAmountClient    cardstatpb.
+						CardStatsTransferServiceClient
 }
 
 type MerchantClient struct {
@@ -136,6 +153,7 @@ type AuthHandleGraphql struct {
 	AuthClient authpb.AuthServiceClient
 	Logger     logger.LoggerInterface
 	Mapping    authgraphqlmapper.AuthGraphqlMapper
+	Cache      auth_cache.AuthMencache
 }
 
 type RoleHandleGraphql struct {
@@ -145,42 +163,49 @@ type RoleHandleGraphql struct {
 	Kafka      *kafka.Kafka
 	CacheRole  mencache.RoleCache
 	Permission rolepermission.RolePermission
+	Cache      role_cache.RoleMencache
 }
 
 type UserHandleGraphql struct {
 	UserClient UserClient
 	Logger     logger.LoggerInterface
 	Mapping    usergraphqlmapper.UserGraphqlMapper
+	Cache      user_cache.UserMencache
 }
 
 type CardHandleGraphql struct {
 	CardClient CardClient
 	Logger     logger.LoggerInterface
 	Mapping    cardgraphqlmapper.CardGraphqlMapper
+	Cache      card_cache.CardMencache
 }
 
 type MerchantHandleGraphql struct {
 	MerchantClient MerchantClient
 	Logger         logger.LoggerInterface
 	Mapping        merchantgraphqlmapper.MerchantGraphqlMapper
+	Cache          merchant_cache.MerchantMencache
 }
 
 type MerchantDocumentHandleGraphql struct {
 	MerchantClient MerchantDocumentClient
 	Logger         logger.LoggerInterface
 	Mapping        merchantdocumentgraphqlmapper.MerchantDocumentGraphqlMapper
+	Cache          merchant_document_cache.MerchantDocumentMencache
 }
 
 type SaldoHandleGraphql struct {
 	SaldoClient SaldoClient
 	Logger      logger.LoggerInterface
 	Mapping     saldographqlmapper.SaldoGraphqlMapper
+	Cache       saldo_cache.SaldoMencache
 }
 
 type TopupHandleGraphql struct {
 	TopupClient TopupClient
 	Logger      logger.LoggerInterface
 	Mapping     topupgraphqlmapper.TopupGraphqlMapper
+	Cache       topup_cache.TopupMencach
 }
 
 type TransactionHandleGraphql struct {
@@ -189,18 +214,21 @@ type TransactionHandleGraphql struct {
 	Mapping           transactiongraphqlmapper.TransactionGraphqlMapper
 	Permission        merchantpermission.MerchantPermission
 	CacheMerchant     mencache.MerchantCache
+	Cache             transaction_cache.TransactionMencache
 }
 
 type TransferHandleGraphql struct {
 	TransferClient TransferClient
 	Logger         logger.LoggerInterface
 	Mapping        transfergraphqlmapper.TransferGraphqlMapper
+	Cache          transfer_cache.TransferMencache
 }
 
 type WithdrawHandleGraphql struct {
 	WithdrawClient WithdrawClient
 	Logger         logger.LoggerInterface
 	Mapping        withdrawgraphqlmapper.WithdrawGraphqlMapper
+	Cache          withdraw_cache.WithdrawMencache
 }
 
 type ServiceConnections struct {
@@ -216,124 +244,173 @@ type ServiceConnections struct {
 	WithdrawClient    *grpc.ClientConn
 }
 
+type Deps struct {
+	Clients  *ServiceConnections
+	Logger   logger.LoggerInterface
+	Kafka    *kafka.Kafka
+	Mencache mencache.CacheApiGateway
+}
+
 func NewResolver(
-	clients *ServiceConnections,
-	logger logger.LoggerInterface,
-	kafka *kafka.Kafka,
-	mencache mencache.CacheApiGateway,
+	deps *Deps,
 ) *Resolver {
+	observability, _ := observability.NewObservability(
+		"graphql-client",
+		deps.Logger,
+	)
+
+	resolverHandle := NewResolverHandler(observability, deps.Logger)
+
+	store := deps.Mencache.GetStore()
+	cacheAuth := auth_cache.NewMencache(store)
+	cacheUser := user_cache.NewUserMencache(store)
+	cacheRole := role_cache.NewRoleMencache(store)
+	cacheSaldo := saldo_cache.NewSaldoMencache(store)
+	cacheTopup := topup_cache.NewTopupMencache(store)
+	cacheTransaction := transaction_cache.NewTransactionMencache(store)
+	cacheTransfer := transfer_cache.NewTransferMencache(store)
+	cacheWithdraw := withdraw_cache.NewWithdrawMencache(store)
+	cacheMerchant := merchant_cache.NewMerchantMencache(store)
+	cacheCard := card_cache.NewCardMencache(store)
+	cacheMerchantDocument := merchant_document_cache.NewMerchantDocumentMencache(store)
+
 	return &Resolver{
+		ResolverHandle: resolverHandle,
 		AuthGraphql: AuthHandleGraphql{
-			AuthClient: authpb.NewAuthServiceClient(clients.AuthClient),
-			Logger:     logger,
+			AuthClient: authpb.NewAuthServiceClient(deps.Clients.AuthClient),
+			Logger:     deps.Logger,
 			Mapping:    authgraphqlmapper.NewAuthGraphqlMapper(),
+			Cache:      cacheAuth,
 		},
 		RoleGraphql: RoleHandleGraphql{
 			RoleClient: RoleClient{
-				RoleQueryClient:   rolepb.NewRoleServiceClient(clients.RoleClient),
-				RoleCommandClient: rolepb.NewRoleCommandServiceClient(clients.RoleClient),
+				RoleQueryClient:   rolepb.NewRoleServiceClient(deps.Clients.RoleClient),
+				RoleCommandClient: rolepb.NewRoleCommandServiceClient(deps.Clients.RoleClient),
 			},
-			Kafka:      kafka,
-			Logger:     logger,
+			Kafka:      deps.Kafka,
+			Logger:     deps.Logger,
 			Mapping:    rolegraphqlmapper.NewRoleGraphqlMapper(),
-			Permission: rolepermission.NewRolePermission(kafka, "request-role", "response-role", 5*time.Second, logger, mencache),
+			Permission: rolepermission.NewRolePermission(deps.Kafka, "request-role", "response-role", 5*time.Second, deps.Logger, deps.Mencache),
+			Cache:      cacheRole,
 		},
 		UserGraphql: UserHandleGraphql{
 			UserClient: UserClient{
-				UserQueryClient:   userpb.NewUserQueryServiceClient(clients.UserClient),
-				UserCommandClient: userpb.NewUserCommandServiceClient(clients.UserClient),
+				UserQueryClient:   userpb.NewUserQueryServiceClient(deps.Clients.UserClient),
+				UserCommandClient: userpb.NewUserCommandServiceClient(deps.Clients.UserClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: usergraphqlmapper.NewUserGraphqlMapper(),
+			Cache:   cacheUser,
 		},
 		CardGraphql: CardHandleGraphql{
 			CardClient: CardClient{
-				CardQueryClient:                  cardpb.NewCardQueryServiceClient(clients.CardClient),
-				CardCommandClient:                cardpb.NewCardCommandServiceClient(clients.CardClient),
-				CardDashboardClient:              cardpb.NewCardDashboardServiceClient(clients.CardClient),
-				CardStatsBalanceClient:           cardstatpb.NewCardStatsBalanceServiceClient(clients.CardClient),
-				CardStatsTopupAmountClient:       cardstatpb.NewCardStatsTopupServiceClient(clients.CardClient),
-				CardStatsTransactionAmountClient: cardstatpb.NewCardStatsTransactionServiceClient(clients.CardClient),
-				CardStatsWithdrawAmountClient:    cardstatpb.NewCardStatsWithdrawServiceClient(clients.CardClient),
-				CardStatsTransferAmountClient:    cardstatpb.NewCardStatsTransferServiceClient(clients.CardClient),
+				CardQueryClient:                  cardpb.NewCardQueryServiceClient(deps.Clients.CardClient),
+				CardCommandClient:                cardpb.NewCardCommandServiceClient(deps.Clients.CardClient),
+				CardDashboardClient:              cardpb.NewCardDashboardServiceClient(deps.Clients.CardClient),
+				CardStatsBalanceClient:           cardstatpb.NewCardStatsBalanceServiceClient(deps.Clients.CardClient),
+				CardStatsTopupAmountClient:       cardstatpb.NewCardStatsTopupServiceClient(deps.Clients.CardClient),
+				CardStatsTransactionAmountClient: cardstatpb.NewCardStatsTransactionServiceClient(deps.Clients.CardClient),
+				CardStatsWithdrawAmountClient:    cardstatpb.NewCardStatsWithdrawServiceClient(deps.Clients.CardClient),
+				CardStatsTransferAmountClient:    cardstatpb.NewCardStatsTransferServiceClient(deps.Clients.CardClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: cardgraphqlmapper.NewCardResponseMapper(),
+			Cache:   cacheCard,
 		},
 		MerchantGraphql: MerchantHandleGraphql{
 			MerchantClient: MerchantClient{
-				MerchantQuery:            merchantpb.NewMerchantQueryServiceClient(clients.MerchantClient),
-				MerchantCommand:          merchantpb.NewMerchantCommandServiceClient(clients.MerchantClient),
-				MerchantTransaction:      merchantpb.NewMerchantTransactionServiceClient(clients.MerchantClient),
-				MerchantStatsAmount:      merchantstatpb.NewMerchantStatsAmountServiceClient(clients.MerchantClient),
-				MerchantStatsTotalAmount: merchantstatpb.NewMerchantStatsTotalAmountServiceClient(clients.MerchantClient),
-				MerchantStatsMethod:      merchantstatpb.NewMerchantStatsMethodServiceClient(clients.MerchantClient),
+				MerchantQuery:            merchantpb.NewMerchantQueryServiceClient(deps.Clients.MerchantClient),
+				MerchantCommand:          merchantpb.NewMerchantCommandServiceClient(deps.Clients.MerchantClient),
+				MerchantTransaction:      merchantpb.NewMerchantTransactionServiceClient(deps.Clients.MerchantClient),
+				MerchantStatsAmount:      merchantstatpb.NewMerchantStatsAmountServiceClient(deps.Clients.MerchantClient),
+				MerchantStatsTotalAmount: merchantstatpb.NewMerchantStatsTotalAmountServiceClient(deps.Clients.MerchantClient),
+				MerchantStatsMethod:      merchantstatpb.NewMerchantStatsMethodServiceClient(deps.Clients.MerchantClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: merchantgraphqlmapper.NewMerchantResponseMapper(),
+			Cache:   cacheMerchant,
 		},
 		MerchantDocumentGraphql: MerchantDocumentHandleGraphql{
 			MerchantClient: MerchantDocumentClient{
-				MerchantDocumentQueryClient:   merchantdocumentpb.NewMerchantDocumentQueryServiceClient(clients.MerchantClient),
-				MerchantDocumentCommandClient: merchantdocumentpb.NewMerchantDocumentCommandServiceClient(clients.MerchantClient),
+				MerchantDocumentQueryClient:   merchantdocumentpb.NewMerchantDocumentQueryServiceClient(deps.Clients.MerchantClient),
+				MerchantDocumentCommandClient: merchantdocumentpb.NewMerchantDocumentCommandServiceClient(deps.Clients.MerchantClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: merchantdocumentgraphqlmapper.NewMerchantDocumentGraphqlMapper(),
+			Cache:   cacheMerchantDocument,
 		},
 		SaldoGraphql: SaldoHandleGraphql{
 			SaldoClient: SaldoClient{
-				SaldoQueryClient:             saldopb.NewSaldoQueryServiceClient(clients.SaldoClient),
-				SaldoCommandClient:           saldopb.NewSaldoCommandServiceClient(clients.SaldoClient),
-				SaldoStatsBalanceClient:      saldostatspb.NewSaldoStatsBalanceServiceClient(clients.SaldoClient),
-				SaldoStatsTotalBalanceClient: saldostatspb.NewSaldoStatsTotalBalanceClient(clients.SaldoClient),
+				SaldoQueryClient:             saldopb.NewSaldoQueryServiceClient(deps.Clients.SaldoClient),
+				SaldoCommandClient:           saldopb.NewSaldoCommandServiceClient(deps.Clients.SaldoClient),
+				SaldoStatsBalanceClient:      saldostatspb.NewSaldoStatsBalanceServiceClient(deps.Clients.SaldoClient),
+				SaldoStatsTotalBalanceClient: saldostatspb.NewSaldoStatsTotalBalanceClient(deps.Clients.SaldoClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: saldographqlmapper.NewSaldoGraphqlMapper(),
+			Cache:   cacheSaldo,
 		},
 		TopupGraphql: TopupHandleGraphql{
 			TopupClient: TopupClient{
-				TopupQueryClient:   topuppb.NewTopupQueryServiceClient(clients.TopupClient),
-				TopupCommandClient: topuppb.NewTopupCommandServiceClient(clients.TopupClient),
-				TopupStatsAmount:   topupstatpb.NewTopupStatsAmountServiceClient(clients.TopupClient),
-				TopupStatsMethod:   topupstatpb.NewTopupStatsMethodServiceClient(clients.TopupClient),
-				TopupStatsStatus:   topupstatpb.NewTopupStatsStatusServiceClient(clients.TopupClient),
+				TopupQueryClient:   topuppb.NewTopupQueryServiceClient(deps.Clients.TopupClient),
+				TopupCommandClient: topuppb.NewTopupCommandServiceClient(deps.Clients.TopupClient),
+				TopupStatsAmount:   topupstatpb.NewTopupStatsAmountServiceClient(deps.Clients.TopupClient),
+				TopupStatsMethod:   topupstatpb.NewTopupStatsMethodServiceClient(deps.Clients.TopupClient),
+				TopupStatsStatus:   topupstatpb.NewTopupStatsStatusServiceClient(deps.Clients.TopupClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: topupgraphqlmapper.NewTopupGraphqlMapper(),
+			Cache:   cacheTopup,
 		},
 		TransactionGraphql: TransactionHandleGraphql{
 			TransactionClient: TransactionClient{
-				TransactionQueryClient:   transactionpb.NewTransactionQueryServiceClient(clients.TransactionClient),
-				TransactionCommandClient: transactionpb.NewTransactionCommandServiceClient(clients.TransactionClient),
-				TransactionStatsAmount:   transactionstatpb.NewTransactionStatsAmountServiceClient(clients.TransactionClient),
-				TransactionStatsMethod:   transactionstatpb.NewTransactionStatsMethodServiceClient(clients.TransactionClient),
-				TransactionStatsStatus:   transactionstatpb.NewTransactionStatsStatusServiceClient(clients.TransactionClient),
+				TransactionQueryClient:   transactionpb.NewTransactionQueryServiceClient(deps.Clients.TransactionClient),
+				TransactionCommandClient: transactionpb.NewTransactionCommandServiceClient(deps.Clients.TransactionClient),
+				TransactionStatsAmount:   transactionstatpb.NewTransactionStatsAmountServiceClient(deps.Clients.TransactionClient),
+				TransactionStatsMethod:   transactionstatpb.NewTransactionStatsMethodServiceClient(deps.Clients.TransactionClient),
+				TransactionStatsStatus:   transactionstatpb.NewTransactionStatsStatusServiceClient(deps.Clients.TransactionClient),
 			},
-			Logger:     logger,
+			Logger:     deps.Logger,
 			Mapping:    transactiongraphqlmapper.NewTransactionGraphqlMapper(),
-			Permission: merchantpermission.NewMerchantPermission(kafka, "request-transaction", "response-transaction", 5*time.Second, logger),
+			Permission: merchantpermission.NewMerchantPermission(deps.Kafka, "request-transaction", "response-transaction", 5*time.Second, deps.Logger),
+			Cache:      cacheTransaction,
 		},
 		TransferGraphql: TransferHandleGraphql{
 			TransferClient: TransferClient{
-				TransferQueryClient:   transferpb.NewTransferQueryServiceClient(clients.TransferClient),
-				TransferCommandClient: transferpb.NewTransferCommandServiceClient(clients.TransferClient),
-				TransferStatsAmount:   transferstatpb.NewTransferStatsAmountServiceClient(clients.TransferClient),
-				TransferStatsStatus:   transferstatpb.NewTransferStatsStatusServiceClient(clients.TransferClient),
+				TransferQueryClient:   transferpb.NewTransferQueryServiceClient(deps.Clients.TransferClient),
+				TransferCommandClient: transferpb.NewTransferCommandServiceClient(deps.Clients.TransferClient),
+				TransferStatsAmount:   transferstatpb.NewTransferStatsAmountServiceClient(deps.Clients.TransferClient),
+				TransferStatsStatus:   transferstatpb.NewTransferStatsStatusServiceClient(deps.Clients.TransferClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: transfergraphqlmapper.NewTransferGraphqlMapper(),
+			Cache:   cacheTransfer,
 		},
 		WithdrawGraphql: WithdrawHandleGraphql{
 			WithdrawClient: WithdrawClient{
-				WithdrawQueryClient:   withdrawpb.NewWithdrawQueryServiceClient(clients.WithdrawClient),
-				WithdrawCommandClient: withdrawpb.NewWithdrawCommandServiceClient(clients.WithdrawClient),
-				WithdrawStatsAmount:   withdrawstatpb.NewWithdrawStatsAmountServiceClient(clients.WithdrawClient),
-				WithdrawStatsStatus:   withdrawstatpb.NewWithdrawStatsStatusServiceClient(clients.WithdrawClient),
+				WithdrawQueryClient:   withdrawpb.NewWithdrawQueryServiceClient(deps.Clients.WithdrawClient),
+				WithdrawCommandClient: withdrawpb.NewWithdrawCommandServiceClient(deps.Clients.WithdrawClient),
+				WithdrawStatsAmount:   withdrawstatpb.NewWithdrawStatsAmountServiceClient(deps.Clients.WithdrawClient),
+				WithdrawStatsStatus:   withdrawstatpb.NewWithdrawStatsStatusServiceClient(deps.Clients.WithdrawClient),
 			},
-			Logger:  logger,
+			Logger:  deps.Logger,
 			Mapping: withdrawgraphqlmapper.NewWithdrawGraphqlMapper(),
+			Cache:   cacheWithdraw,
 		},
 	}
+}
+
+func (h *Resolver) handleGraphQLError(err error, operation string) *errors.AppError {
+	if err == nil {
+		return nil
+	}
+
+	var appErr *errors.AppError
+	if errorstd.As(err, &appErr) {
+		return appErr
+	}
+
+	return errors.NewInternalError(err).WithMessage("Failed to " + operation)
 }
 
 func (r *Resolver) parseValidationErrors(err error) []sharedErrors.ValidationError {

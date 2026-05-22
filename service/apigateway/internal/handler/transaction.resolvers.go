@@ -6,668 +6,967 @@ package graph
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	graphqlerror "github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/errors"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-apigateway/internal/model"
 	pb "github.com/MamangRust/monolith-graphql-payment-gateway-pb/transaction"
 	"github.com/MamangRust/monolith-graphql-payment-gateway-shared/domain/requests"
-	sharedErrors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	errors "github.com/MamangRust/monolith-graphql-payment-gateway-shared/errors"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // CreateTransaction is the resolver for the createTransaction field.
 func (r *mutationResolver) CreateTransaction(ctx context.Context, input model.CreateTransactionInput) (*model.APIResponseTransaction, error) {
-	_, err := r.TransactionGraphql.Permission.ValidateMerchant(ctx, input.APIKey)
+	return ResolverHandle(r.ResolverHandle, "CreateTransaction", ctx, func(ctx context.Context) (*model.APIResponseTransaction, error) {
+		_, err := r.TransactionGraphql.Permission.ValidateMerchant(ctx, input.APIKey)
+		if err != nil {
+			return nil, errors.NewBadRequestError("failed to validate API key: "+err.Error())
+		}
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate API key: %w", err)
-	}
+		transactionTime, err := time.Parse("2006-01-02", *input.TransactionTime)
+		if err != nil {
+			return nil, errors.NewBadRequestError("invalid date format for transactionTime: "+err.Error()+" (expected YYYY-MM-DD)")
+		}
+		merchantId := int(input.MerchantID)
 
-	transactionTime, err := time.Parse("2006-01-02", *input.TransactionTime)
-	merchantId := int(input.MerchantID)
+		request := &requests.CreateTransactionRequest{
+			CardNumber:      input.CardNumber,
+			Amount:          int(input.Amount),
+			PaymentMethod:   input.PaymentMethod,
+			MerchantID:      &merchantId,
+			TransactionTime: transactionTime,
+		}
 
-	if err != nil {
-		return nil, fmt.Errorf("invalid date format for transactionTime: %v (expected YYYY-MM-DD)", err)
-	}
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	request := &requests.CreateTransactionRequest{
-		CardNumber:      input.CardNumber,
-		Amount:          int(input.Amount),
-		PaymentMethod:   input.PaymentMethod,
-		MerchantID:      &merchantId,
-		TransactionTime: transactionTime,
-	}
+		req := &pb.CreateTransactionRequest{
+			ApiKey:          input.APIKey,
+			CardNumber:      input.CardNumber,
+			Amount:          int32(input.Amount),
+			PaymentMethod:   input.PaymentMethod,
+			MerchantId:      int32(merchantId),
+			TransactionTime: timestamppb.New(transactionTime),
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		res, errResp := r.TransactionGraphql.TransactionClient.TransactionCommandClient.CreateTransaction(ctx, req)
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "CreateTransaction")
+		}
 
-	req := &pb.CreateTransactionRequest{
-		ApiKey:          input.APIKey,
-		CardNumber:      input.CardNumber,
-		Amount:          int32(input.Amount),
-		PaymentMethod:   input.PaymentMethod,
-		MerchantId:      int32(merchantId),
-		TransactionTime: timestamppb.New(transactionTime),
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransaction(res)
+		if so != nil && so.Data != nil {
+			r.TransactionGraphql.Cache.DeleteTransactionCache(ctx, int(so.Data.ID))
+		}
 
-	res, errResp := r.TransactionGraphql.TransactionClient.TransactionCommandClient.CreateTransaction(ctx, req)
-
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransaction(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // UpdateTransaction is the resolver for the updateTransaction field.
 func (r *mutationResolver) UpdateTransaction(ctx context.Context, input model.UpdateTransactionInput) (*model.APIResponseTransaction, error) {
-	id := int32(input.TransactionID)
+	return ResolverHandle(r.ResolverHandle, "UpdateTransaction", ctx, func(ctx context.Context) (*model.APIResponseTransaction, error) {
+		id := int32(input.TransactionID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("Invalid Transaction ID")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTransactionInvalidID
-	}
+		_, err := r.TransactionGraphql.Permission.ValidateMerchant(ctx, input.APIKey)
+		if err != nil {
+			return nil, errors.NewBadRequestError("failed to validate API key: "+err.Error())
+		}
 
-	_, err := r.TransactionGraphql.Permission.ValidateMerchant(ctx, input.APIKey)
+		transactionTime, err := time.Parse("2006-01-02", *input.TransactionTime)
+		if err != nil {
+			return nil, errors.NewBadRequestError("invalid date format for transactionTime: "+err.Error()+" (expected YYYY-MM-DD)")
+		}
+		merchantId := int(input.MerchantID)
 
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate API key: %w", err)
-	}
+		txnId := int(id)
+		request := &requests.UpdateTransactionRequest{
+			TransactionID:   &txnId,
+			CardNumber:      input.CardNumber,
+			Amount:          int(input.Amount),
+			PaymentMethod:   input.PaymentMethod,
+			MerchantID:      &merchantId,
+			TransactionTime: transactionTime,
+		}
 
-	transactionTime, err := time.Parse("2006-01-02", *input.TransactionTime)
-	merchantId := int(input.MerchantID)
+		if err := request.Validate(); err != nil {
+			validations := r.parseValidationErrors(err)
+			return nil, errors.NewValidationError(validations)
+		}
 
-	if err != nil {
-		return nil, fmt.Errorf("invalid date format for transactionTime: %v (expected YYYY-MM-DD)", err)
-	}
+		req := &pb.UpdateTransactionRequest{
+			TransactionId:   id,
+			CardNumber:      input.CardNumber,
+			Amount:          int32(input.Amount),
+			PaymentMethod:   input.PaymentMethod,
+			MerchantId:      int32(merchantId),
+			TransactionTime: timestamppb.New(transactionTime),
+		}
 
-	txnId := int(id)
-	request := &requests.UpdateTransactionRequest{
-		TransactionID:   &txnId,
-		CardNumber:      input.CardNumber,
-		Amount:          int(input.Amount),
-		PaymentMethod:   input.PaymentMethod,
-		MerchantID:      &merchantId,
-		TransactionTime: transactionTime,
-	}
+		res, errResp := r.TransactionGraphql.TransactionClient.TransactionCommandClient.UpdateTransaction(ctx, req)
+		if errResp != nil {
+			return nil, r.handleGraphQLError(errResp, "UpdateTransaction")
+		}
 
-	if err := request.Validate(); err != nil {
-		validations := r.parseValidationErrors(err)
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(sharedErrors.NewValidationError(validations))
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransaction(res)
+		r.TransactionGraphql.Cache.DeleteTransactionCache(ctx, int(id))
 
-	req := &pb.UpdateTransactionRequest{
-		TransactionId:   id,
-		CardNumber:      input.CardNumber,
-		Amount:          int32(input.Amount),
-		PaymentMethod:   input.PaymentMethod,
-		MerchantId:      int32(merchantId),
-		TransactionTime: timestamppb.New(transactionTime),
-	}
-
-	res, errResp := r.TransactionGraphql.TransactionClient.TransactionCommandClient.UpdateTransaction(ctx, req)
-
-	if errResp != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(errResp)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransaction(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // TrashedTransaction is the resolver for the trashedTransaction field.
 func (r *mutationResolver) TrashedTransaction(ctx context.Context, input model.FindByIDTransactionInput) (*model.APIResponseTransactionDeleteAt, error) {
-	id := int32(input.TransactionID)
+	return ResolverHandle(r.ResolverHandle, "TrashedTransaction", ctx, func(ctx context.Context) (*model.APIResponseTransactionDeleteAt, error) {
+		id := int32(input.TransactionID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("Invalid Transaction ID")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTransactionInvalidID
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.TrashedTransaction(ctx, &pb.FindByIdTransactionRequest{
+			TransactionId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "TrashedTransaction")
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.TrashedTransaction(ctx, &pb.FindByIdTransactionRequest{
-		TransactionId: id,
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionDeleteAt(res)
+		r.TransactionGraphql.Cache.DeleteTransactionCache(ctx, int(id))
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionDeleteAt(res)
-
-	return so, nil
 }
 
 // RestoreTransaction is the resolver for the restoreTransaction field.
 func (r *mutationResolver) RestoreTransaction(ctx context.Context, input model.FindByIDTransactionInput) (*model.APIResponseTransactionDeleteAt, error) {
-	id := int32(input.TransactionID)
+	return ResolverHandle(r.ResolverHandle, "RestoreTransaction", ctx, func(ctx context.Context) (*model.APIResponseTransactionDeleteAt, error) {
+		id := int32(input.TransactionID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("Invalid Transaction ID")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTransactionInvalidID
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.RestoreTransaction(ctx, &pb.FindByIdTransactionRequest{
+			TransactionId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreTransaction")
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.RestoreTransaction(ctx, &pb.FindByIdTransactionRequest{
-		TransactionId: id,
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionDeleteAt(res)
+		r.TransactionGraphql.Cache.DeleteTransactionCache(ctx, int(id))
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionDeleteAt(res)
-
-	return so, nil
 }
 
 // DeleteTransactionPermanent is the resolver for the deleteTransactionPermanent field.
 func (r *mutationResolver) DeleteTransactionPermanent(ctx context.Context, input model.FindByIDTransactionInput) (*model.APIResponseTransactionDelete, error) {
-	id := int32(input.TransactionID)
+	return ResolverHandle(r.ResolverHandle, "DeleteTransactionPermanent", ctx, func(ctx context.Context) (*model.APIResponseTransactionDelete, error) {
+		id := int32(input.TransactionID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("Invalid Transaction ID")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTransactionInvalidID
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.DeleteTransactionPermanent(ctx, &pb.FindByIdTransactionRequest{
+			TransactionId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteTransactionPermanent")
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.DeleteTransactionPermanent(ctx, &pb.FindByIdTransactionRequest{
-		TransactionId: id,
+		so := r.TransactionGraphql.Mapping.ToGraphqlTransactionDelete(res)
+		r.TransactionGraphql.Cache.DeleteTransactionCache(ctx, int(id))
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlTransactionDelete(res)
-
-	return so, nil
 }
 
 // RestoreAllTransaction is the resolver for the restoreAllTransaction field.
 func (r *mutationResolver) RestoreAllTransaction(ctx context.Context) (*model.APIResponseTransactionAll, error) {
-	panic(fmt.Errorf("not implemented: RestoreAllTransaction - restoreAllTransaction"))
+	return ResolverHandle(r.ResolverHandle, "RestoreAllTransaction", ctx, func(ctx context.Context) (*model.APIResponseTransactionAll, error) {
+		res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.RestoreAllTransaction(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "RestoreAllTransaction")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlTransactionAll(res)
+		return so, nil
+	})
 }
 
 // DeleteAllTransactionPermanent is the resolver for the deleteAllTransactionPermanent field.
 func (r *mutationResolver) DeleteAllTransactionPermanent(ctx context.Context) (*model.APIResponseTransactionAll, error) {
-	panic(fmt.Errorf("not implemented: DeleteAllTransactionPermanent - deleteAllTransactionPermanent"))
+	return ResolverHandle(r.ResolverHandle, "DeleteAllTransactionPermanent", ctx, func(ctx context.Context) (*model.APIResponseTransactionAll, error) {
+		res, err := r.TransactionGraphql.TransactionClient.TransactionCommandClient.DeleteAllTransactionPermanent(ctx, &emptypb.Empty{})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "DeleteAllTransactionPermanent")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlTransactionAll(res)
+		return so, nil
+	})
 }
 
 // FindAllTransaction is the resolver for the findAllTransaction field.
 func (r *queryResolver) FindAllTransaction(ctx context.Context, input model.FindAllTransactionInput) (*model.APIResponsePaginationTransaction, error) {
-	panic(fmt.Errorf("not implemented: FindAllTransaction - findAllTransaction"))
+	return ResolverHandle(r.ResolverHandle, "FindAllTransaction", ctx, func(ctx context.Context) (*model.APIResponsePaginationTransaction, error) {
+		// Normalize input
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
+
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
+
+		normalizedInput := model.FindAllTransactionInput{
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   &search,
+		}
+
+		if cacheData, ok := r.TransactionGraphql.Cache.GetCachedTransactionsCache(ctx, &normalizedInput); ok {
+			return cacheData, nil
+		}
+
+		req := &pb.FindAllTransactionRequest{
+			Search:   search,
+			Page:     page,
+			PageSize: pageSize,
+		}
+
+		res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindAllTransaction(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllTransaction")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlPaginationTransaction(res)
+		r.TransactionGraphql.Cache.SetCachedTransactionsCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindAllTransactionByCardNumber is the resolver for the findAllTransactionByCardNumber field.
 func (r *queryResolver) FindAllTransactionByCardNumber(ctx context.Context, input model.FindAllTransactionCardNumberInput) (*model.APIResponsePaginationTransaction, error) {
-	panic(fmt.Errorf("not implemented: FindAllTransactionByCardNumber - findAllTransactionByCardNumber"))
+	return ResolverHandle(r.ResolverHandle, "FindAllTransactionByCardNumber", ctx, func(ctx context.Context) (*model.APIResponsePaginationTransaction, error) {
+		// Normalize input
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
+
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
+
+		normalizedInput := model.FindAllTransactionCardNumberInput{
+			CardNumber: input.CardNumber,
+			Page:       input.Page,
+			PageSize:   input.PageSize,
+			Search:     &search,
+		}
+
+		if cacheData, ok := r.TransactionGraphql.Cache.GetCachedTransactionByCardNumberCache(ctx, &normalizedInput); ok {
+			return cacheData, nil
+		}
+
+		req := &pb.FindAllTransactionCardNumberRequest{
+			CardNumber: input.CardNumber,
+			Search:     search,
+			Page:       page,
+			PageSize:   pageSize,
+		}
+
+		res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindAllTransactionByCardNumber(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindAllTransactionByCardNumber")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlPaginationTransaction(res)
+		r.TransactionGraphql.Cache.SetCachedTransactionByCardNumberCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByIDTransaction is the resolver for the findByIdTransaction field.
 func (r *queryResolver) FindByIDTransaction(ctx context.Context, input model.FindByIDTransactionInput) (*model.APIResponseTransaction, error) {
-	panic(fmt.Errorf("not implemented: FindByIDTransaction - findByIdTransaction"))
+	return ResolverHandle(r.ResolverHandle, "FindByIDTransaction", ctx, func(ctx context.Context) (*model.APIResponseTransaction, error) {
+		id := int32(input.TransactionID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("Invalid Transaction ID")
+		}
+
+		if cacheData, ok := r.TransactionGraphql.Cache.GetCachedTransactionCache(ctx, int(id)); ok {
+			return cacheData, nil
+		}
+
+		res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindByIdTransaction(ctx, &pb.FindByIdTransactionRequest{
+			TransactionId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByIDTransaction")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransaction(res)
+		r.TransactionGraphql.Cache.SetCachedTransactionCache(ctx, so)
+
+		return so, nil
+	})
 }
 
 // FindMonthlyTransactionStatusSuccess is the resolver for the findMonthlyTransactionStatusSuccess field.
 func (r *queryResolver) FindMonthlyTransactionStatusSuccess(ctx context.Context, input model.FindMonthlyTransactionStatusInput) (*model.APIResponseTransactionMonthStatusSuccess, error) {
-	year := int32(input.Year)
-	month := int32(input.Month)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransactionStatusSuccess", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthStatusSuccess, error) {
+		year := int32(input.Year)
+		month := int32(input.Month)
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if month <= 0 {
+			return nil, errors.NewBadRequestError("Invalid month")
+		}
 
-	if month <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidMonth
-	}
+		cacheReq := &requests.MonthStatusTransaction{
+			Year:  int(year),
+			Month: int(month),
+		}
 
-	reqService := &pb.FindMonthlyTransactionStatus{
-		Year:  year,
-		Month: month,
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthTransactionStatusSuccessCache(ctx, cacheReq); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusSuccess(ctx, reqService)
+		reqService := &pb.FindMonthlyTransactionStatus{
+			Year:  year,
+			Month: month,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusSuccess(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransactionStatusSuccess")
+		}
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusSuccess(res)
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusSuccess(res)
+		r.TransactionGraphql.Cache.SetMonthTransactionStatusSuccessCache(ctx, cacheReq, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTransactionStatusSuccess is the resolver for the findYearlyTransactionStatusSuccess field.
 func (r *queryResolver) FindYearlyTransactionStatusSuccess(ctx context.Context, input model.FindYearTransactionStatusInput) (*model.APIResponseTransactionYearStatusSuccess, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransactionStatusSuccess", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearStatusSuccess, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearTransactionStatusSuccessCache(ctx, int(year)); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindYearTransactionStatus{
-		Year: year,
-	}
+		reqService := &pb.FindYearTransactionStatus{
+			Year: year,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusSuccess(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusSuccess(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransactionStatusSuccess")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusSuccess(res)
+		r.TransactionGraphql.Cache.SetYearTransactionStatusSuccessCache(ctx, int(year), so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusSuccess(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTransactionStatusFailed is the resolver for the findMonthlyTransactionStatusFailed field.
 func (r *queryResolver) FindMonthlyTransactionStatusFailed(ctx context.Context, input model.FindMonthlyTransactionStatusInput) (*model.APIResponseTransactionMonthStatusFailed, error) {
-	year := int32(input.Year)
-	month := int32(input.Month)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransactionStatusFailed", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthStatusFailed, error) {
+		year := int32(input.Year)
+		month := int32(input.Month)
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if month <= 0 {
+			return nil, errors.NewBadRequestError("Invalid month")
+		}
 
-	if month <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidMonth
-	}
+		cacheReq := &requests.MonthStatusTransaction{
+			Year:  int(year),
+			Month: int(month),
+		}
 
-	reqService := &pb.FindMonthlyTransactionStatus{
-		Year:  year,
-		Month: month,
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthTransactionStatusFailedCache(ctx, cacheReq); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusFailed(ctx, reqService)
+		reqService := &pb.FindMonthlyTransactionStatus{
+			Year:  year,
+			Month: month,
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusFailed(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransactionStatusFailed")
+		}
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusFailed(res)
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusFailed(res)
+		r.TransactionGraphql.Cache.SetMonthTransactionStatusFailedCache(ctx, cacheReq, so)
 
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTransactionStatusFailed is the resolver for the findYearlyTransactionStatusFailed field.
 func (r *queryResolver) FindYearlyTransactionStatusFailed(ctx context.Context, input model.FindYearTransactionStatusInput) (*model.APIResponseTransactionYearStatusFailed, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransactionStatusFailed", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearStatusFailed, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearTransactionStatusFailedCache(ctx, int(year)); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindYearTransactionStatus{
-		Year: year,
-	}
+		reqService := &pb.FindYearTransactionStatus{
+			Year: year,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusFailed(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusFailed(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransactionStatusFailed")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusFailed(res)
+		r.TransactionGraphql.Cache.SetYearTransactionStatusFailedCache(ctx, int(year), so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusFailed(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTransactionStatusSuccessByCardNumber is the resolver for the findMonthlyTransactionStatusSuccessByCardNumber field.
 func (r *queryResolver) FindMonthlyTransactionStatusSuccessByCardNumber(ctx context.Context, input model.FindMonthlyTransactionStatusCardNumberInput) (*model.APIResponseTransactionMonthStatusSuccess, error) {
-	year := int32(input.Year)
-	month := int32(input.Month)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransactionStatusSuccessByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthStatusSuccess, error) {
+		year := int32(input.Year)
+		month := int32(input.Month)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if month <= 0 {
+			return nil, errors.NewBadRequestError("Invalid month")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if month <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidMonth
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthTransactionStatusSuccessByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		reqService := &pb.FindMonthlyTransactionStatusCardNumber{
+			Year:       year,
+			Month:      month,
+			CardNumber: cardNumber,
+		}
 
-	reqService := &pb.FindMonthlyTransactionStatusCardNumber{
-		Year:       year,
-		Month:      month,
-		CardNumber: cardNumber,
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusSuccessByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransactionStatusSuccessByCardNumber")
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusSuccessByCardNumber(ctx, reqService)
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusSuccess(res)
+		r.TransactionGraphql.Cache.SetMonthTransactionStatusSuccessByCardCache(ctx, &input, so)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusSuccess(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTransactionStatusSuccessByCardNumber is the resolver for the findYearlyTransactionStatusSuccessByCardNumber field.
 func (r *queryResolver) FindYearlyTransactionStatusSuccessByCardNumber(ctx context.Context, input model.FindYearTransactionStatusCardNumberInput) (*model.APIResponseTransactionYearStatusSuccess, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransactionStatusSuccessByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearStatusSuccess, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearTransactionStatusSuccessByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindYearTransactionStatusCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTransactionStatusCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusSuccessByCardNumber(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusSuccessByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransactionStatusSuccessByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusSuccess(res)
+		r.TransactionGraphql.Cache.SetYearTransactionStatusSuccessByCardCache(ctx, &input, so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusSuccess(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyTransactionStatusFailedByCardNumber is the resolver for the findMonthlyTransactionStatusFailedByCardNumber field.
 func (r *queryResolver) FindMonthlyTransactionStatusFailedByCardNumber(ctx context.Context, input model.FindMonthlyTransactionStatusCardNumberInput) (*model.APIResponseTransactionMonthStatusFailed, error) {
-	year := int32(input.Year)
-	month := int32(input.Month)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyTransactionStatusFailedByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthStatusFailed, error) {
+		year := int32(input.Year)
+		month := int32(input.Month)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if month <= 0 {
+			return nil, errors.NewBadRequestError("Invalid month")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if month <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidMonth
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthTransactionStatusFailedByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		reqService := &pb.FindMonthlyTransactionStatusCardNumber{
+			Year:       year,
+			Month:      month,
+			CardNumber: cardNumber,
+		}
 
-	reqService := &pb.FindMonthlyTransactionStatusCardNumber{
-		Year:       year,
-		Month:      month,
-		CardNumber: cardNumber,
-	}
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusFailedByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyTransactionStatusFailedByCardNumber")
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindMonthlyTransactionStatusFailedByCardNumber(ctx, reqService)
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusFailed(res)
+		r.TransactionGraphql.Cache.SetMonthTransactionStatusFailedByCardCache(ctx, &input, so)
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthStatusFailed(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyTransactionStatusFailedByCardNumber is the resolver for the findYearlyTransactionStatusFailedByCardNumber field.
 func (r *queryResolver) FindYearlyTransactionStatusFailedByCardNumber(ctx context.Context, input model.FindYearTransactionStatusCardNumberInput) (*model.APIResponseTransactionYearStatusFailed, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyTransactionStatusFailedByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearStatusFailed, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearTransactionStatusFailedByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindYearTransactionStatusCardNumber{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindYearTransactionStatusCardNumber{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusFailedByCardNumber(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsStatus.FindYearlyTransactionStatusFailedByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyTransactionStatusFailedByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusFailed(res)
+		r.TransactionGraphql.Cache.SetYearTransactionStatusFailedByCardCache(ctx, &input, so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearStatusFailed(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyPaymentMethods is the resolver for the findMonthlyPaymentMethods field.
 func (r *queryResolver) FindMonthlyPaymentMethods(ctx context.Context, input model.FindYearTransactionStatusInput) (*model.APIResponseTransactionMonthMethod, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyPaymentMethods", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthMethod, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthlyPaymentMethodsCache(ctx, int(year)); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindMonthlyPaymentMethods(ctx, &pb.FindYearTransactionStatus{
-		Year: year,
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindMonthlyPaymentMethods(ctx, &pb.FindYearTransactionStatus{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyPaymentMethods")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthMethod(res)
+		r.TransactionGraphql.Cache.SetMonthlyPaymentMethodsCache(ctx, int(year), so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthMethod(res)
-
-	return so, nil
 }
 
 // FindYearlyPaymentMethods is the resolver for the findYearlyPaymentMethods field.
 func (r *queryResolver) FindYearlyPaymentMethods(ctx context.Context, input model.FindYearTransactionStatusInput) (*model.APIResponseTransactionYearMethod, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyPaymentMethods", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearMethod, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearlyPaymentMethodsCache(ctx, int(year)); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindYearlyPaymentMethods(ctx, &pb.FindYearTransactionStatus{
-		Year: year,
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindYearlyPaymentMethods(ctx, &pb.FindYearTransactionStatus{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyPaymentMethods")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearMethod(res)
+		r.TransactionGraphql.Cache.SetYearlyPaymentMethodsCache(ctx, int(year), so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearMethod(res)
-
-	return so, nil
 }
 
 // FindMonthlyAmounts is the resolver for the findMonthlyAmounts field.
 func (r *queryResolver) FindMonthlyAmounts(ctx context.Context, input model.FindYearTransactionStatusInput) (*model.APIResponseTransactionMonthAmount, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyAmounts", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthlyAmountsCache(ctx, int(year)); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindMonthlyAmounts(ctx, &pb.FindYearTransactionStatus{
-		Year: year,
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindMonthlyAmounts(ctx, &pb.FindYearTransactionStatus{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyAmounts")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthAmount(res)
+		r.TransactionGraphql.Cache.SetMonthlyAmountsCache(ctx, int(year), so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthAmount(res)
-
-	return so, nil
 }
 
 // FindYearlyAmounts is the resolver for the findYearlyAmounts field.
 func (r *queryResolver) FindYearlyAmounts(ctx context.Context, input model.FindYearTransactionStatusInput) (*model.APIResponseTransactionYearAmount, error) {
-	year := int32(input.Year)
+	return ResolverHandle(r.ResolverHandle, "FindYearlyAmounts", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearAmount, error) {
+		year := int32(input.Year)
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearlyAmountsCache(ctx, int(year)); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindYearlyAmounts(ctx, &pb.FindYearTransactionStatus{
-		Year: year,
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindYearlyAmounts(ctx, &pb.FindYearTransactionStatus{
+			Year: year,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyAmounts")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearAmount(res)
+		r.TransactionGraphql.Cache.SetYearlyAmountsCache(ctx, int(year), so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearAmount(res)
-
-	return so, nil
 }
 
 // FindMonthlyPaymentMethodsByCardNumber is the resolver for the findMonthlyPaymentMethodsByCardNumber field.
 func (r *queryResolver) FindMonthlyPaymentMethodsByCardNumber(ctx context.Context, input model.FindByYearCardNumberTransactionInput) (*model.APIResponseTransactionMonthMethod, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyPaymentMethodsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthMethod, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthlyPaymentMethodsByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindByYearCardNumberTransactionRequest{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindByYearCardNumberTransactionRequest{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindMonthlyPaymentMethodsByCardNumber(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindMonthlyPaymentMethodsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyPaymentMethodsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthMethod(res)
+		r.TransactionGraphql.Cache.SetMonthlyPaymentMethodsByCardCache(ctx, &input, so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthMethod(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyPaymentMethodsByCardNumber is the resolver for the findYearlyPaymentMethodsByCardNumber field.
 func (r *queryResolver) FindYearlyPaymentMethodsByCardNumber(ctx context.Context, input model.FindByYearCardNumberTransactionInput) (*model.APIResponseTransactionYearMethod, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyPaymentMethodsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearMethod, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearlyPaymentMethodsByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindByYearCardNumberTransactionRequest{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindByYearCardNumberTransactionRequest{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindYearlyPaymentMethodsByCardNumber(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsMethod.FindYearlyPaymentMethodsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyPaymentMethodsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearMethod(res)
+		r.TransactionGraphql.Cache.SetYearlyPaymentMethodsByCardCache(ctx, &input, so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearMethod(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindMonthlyAmountsByCardNumber is the resolver for the findMonthlyAmountsByCardNumber field.
 func (r *queryResolver) FindMonthlyAmountsByCardNumber(ctx context.Context, input model.FindByYearCardNumberTransactionInput) (*model.APIResponseTransactionMonthAmount, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindMonthlyAmountsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionMonthAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetMonthlyAmountsByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindByYearCardNumberTransactionRequest{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindByYearCardNumberTransactionRequest{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindMonthlyAmountsByCardNumber(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindMonthlyAmountsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindMonthlyAmountsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthAmount(res)
+		r.TransactionGraphql.Cache.SetMonthlyAmountsByCardCache(ctx, &input, so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionMonthAmount(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindYearlyAmountsByCardNumber is the resolver for the findYearlyAmountsByCardNumber field.
 func (r *queryResolver) FindYearlyAmountsByCardNumber(ctx context.Context, input model.FindByYearCardNumberTransactionInput) (*model.APIResponseTransactionYearAmount, error) {
-	year := int32(input.Year)
-	cardNumber := input.CardNumber
+	return ResolverHandle(r.ResolverHandle, "FindYearlyAmountsByCardNumber", ctx, func(ctx context.Context) (*model.APIResponseTransactionYearAmount, error) {
+		year := int32(input.Year)
+		cardNumber := input.CardNumber
 
-	if year <= 0 {
-		return nil, graphqlerror.ErrGraphqlInvalidYear
-	}
+		if year <= 0 {
+			return nil, errors.NewBadRequestError("Invalid year")
+		}
+		if cardNumber == "" {
+			return nil, errors.NewBadRequestError("Invalid card number")
+		}
 
-	if cardNumber == "" {
-		return nil, graphqlerror.ErrGraphqlInvalidCardNumber
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetYearlyAmountsByCardCache(ctx, &input); ok {
+			return cacheData, nil
+		}
 
-	reqService := &pb.FindByYearCardNumberTransactionRequest{
-		Year:       year,
-		CardNumber: cardNumber,
-	}
+		reqService := &pb.FindByYearCardNumberTransactionRequest{
+			Year:       year,
+			CardNumber: cardNumber,
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindYearlyAmountsByCardNumber(ctx, reqService)
+		res, err := r.TransactionGraphql.TransactionClient.TransactionStatsAmount.FindYearlyAmountsByCardNumber(ctx, reqService)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindYearlyAmountsByCardNumber")
+		}
 
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearAmount(res)
+		r.TransactionGraphql.Cache.SetYearlyAmountsByCardCache(ctx, &input, so)
 
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactionYearAmount(res)
-
-	return so, nil
+		return so, nil
+	})
 }
 
 // FindTransactionByMerchantID is the resolver for the findTransactionByMerchantId field.
 func (r *queryResolver) FindTransactionByMerchantID(ctx context.Context, input model.FindTransactionByMerchantIDInput) (*model.APIResponseTransactions, error) {
-	id := int32(input.MerchantID)
+	return ResolverHandle(r.ResolverHandle, "FindTransactionByMerchantID", ctx, func(ctx context.Context) (*model.APIResponseTransactions, error) {
+		id := int32(input.MerchantID)
+		if id == 0 {
+			return nil, errors.NewBadRequestError("Invalid Transaction Merchant ID")
+		}
 
-	if id == 0 {
-		return nil, graphqlerror.ErrGraphqlTransactionInvalidMerchantID
-	}
+		if cacheData, ok := r.TransactionGraphql.Cache.GetCachedTransactionByMerchantIdCache(ctx, int(id)); ok {
+			return cacheData, nil
+		}
 
-	res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindTransactionByMerchantId(ctx, &pb.FindTransactionByMerchantIdRequest{
-		MerchantId: id,
+		res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindTransactionByMerchantId(ctx, &pb.FindTransactionByMerchantIdRequest{
+			MerchantId: id,
+		})
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindTransactionByMerchantID")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactions(res)
+		r.TransactionGraphql.Cache.SetCachedTransactionByMerchantIdCache(ctx, int(id), so)
+
+		return so, nil
 	})
-
-	if err != nil {
-		return nil, graphqlerror.ToGraphqlErrorFromErrorResponse(err)
-	}
-
-	so := r.TransactionGraphql.Mapping.ToGraphqlResponseTransactions(res)
-
-	return so, nil
 }
 
 // FindByActiveTransaction is the resolver for the findByActiveTransaction field.
 func (r *queryResolver) FindByActiveTransaction(ctx context.Context, input model.FindAllTransactionInput) (*model.APIResponsePaginationTransactionDeleteAt, error) {
-	panic(fmt.Errorf("not implemented: FindByActiveTransaction - findByActiveTransaction"))
+	return ResolverHandle(r.ResolverHandle, "FindByActiveTransaction", ctx, func(ctx context.Context) (*model.APIResponsePaginationTransactionDeleteAt, error) {
+		// Normalize input
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
+
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
+
+		normalizedInput := model.FindAllTransactionInput{
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   &search,
+		}
+
+		if cacheData, ok := r.TransactionGraphql.Cache.GetCachedTransactionActiveCache(ctx, &normalizedInput); ok {
+			return cacheData, nil
+		}
+
+		req := &pb.FindAllTransactionRequest{
+			Search:   search,
+			Page:     page,
+			PageSize: pageSize,
+		}
+
+		res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindByActiveTransaction(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByActiveTransaction")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlPaginationTransactionDeleteAt(res)
+		r.TransactionGraphql.Cache.SetCachedTransactionActiveCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }
 
 // FindByTrashedTransaction is the resolver for the findByTrashedTransaction field.
 func (r *queryResolver) FindByTrashedTransaction(ctx context.Context, input model.FindAllTransactionInput) (*model.APIResponsePaginationTransactionDeleteAt, error) {
-	panic(fmt.Errorf("not implemented: FindByTrashedTransaction - findByTrashedTransaction"))
+	return ResolverHandle(r.ResolverHandle, "FindByTrashedTransaction", ctx, func(ctx context.Context) (*model.APIResponsePaginationTransactionDeleteAt, error) {
+		// Normalize input
+		page := int32(1)
+		pageSize := int32(10)
+		search := ""
+
+		if input.Page != nil && *input.Page > 0 {
+			page = int32(*input.Page)
+		}
+		if input.PageSize != nil && *input.PageSize > 0 {
+			pageSize = int32(*input.PageSize)
+		}
+		if input.Search != nil {
+			search = *input.Search
+		}
+
+		normalizedInput := model.FindAllTransactionInput{
+			Page:     input.Page,
+			PageSize: input.PageSize,
+			Search:   &search,
+		}
+
+		if cacheData, ok := r.TransactionGraphql.Cache.GetCachedTransactionTrashedCache(ctx, &normalizedInput); ok {
+			return cacheData, nil
+		}
+
+		req := &pb.FindAllTransactionRequest{
+			Search:   search,
+			Page:     page,
+			PageSize: pageSize,
+		}
+
+		res, err := r.TransactionGraphql.TransactionClient.TransactionQueryClient.FindByTrashedTransaction(ctx, req)
+		if err != nil {
+			return nil, r.handleGraphQLError(err, "FindByTrashedTransaction")
+		}
+
+		so := r.TransactionGraphql.Mapping.ToGraphqlPaginationTransactionDeleteAt(res)
+		r.TransactionGraphql.Cache.SetCachedTransactionTrashedCache(ctx, &normalizedInput, so)
+
+		return so, nil
+	})
 }

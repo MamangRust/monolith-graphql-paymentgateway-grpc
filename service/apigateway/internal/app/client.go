@@ -213,7 +213,12 @@ func RunClient() (*Client, func(), error) {
 		Logger: log,
 	})
 
-	resolver := graph.NewResolver(conns, log, myKafka, mencache)
+	resolver := graph.NewResolver(&graph.Deps{
+		Clients:  conns,
+		Logger:   log,
+		Kafka:    myKafka,
+		Mencache: mencache,
+	})
 
 	port := getEnvOrDefault("CLIENT_PORT", "5000")
 
