@@ -816,7 +816,6 @@ monolith-graphql-paymentgateway-grpc/
 
 The platform features tailored Grafana Dashboards displaying sub-second metrics, transaction rates, memory profiles, cache states, and database logs for every service:
 
-````carousel
 ![Auth Service Metrics](./images/auth-service.png)
 <!-- slide -->
 ![Card Service Metrics](./images/card-service.png)
@@ -840,7 +839,7 @@ The platform features tailored Grafana Dashboards displaying sub-second metrics,
 ![Withdraw Service Metrics](./images/withdraw-service.png)
 <!-- slide -->
 ![Node Exporter System Metrics](./images/node-exporter.png)
-````
+
 
 ---
 
